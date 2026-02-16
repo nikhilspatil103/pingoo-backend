@@ -1,7 +1,7 @@
 {
-  "name": "koozi-backend",
+  "name": "pingoo-backend",
   "version": "1.0.0",
-  "description": "Koozi dating app backend",
+  "description": "Pingoo dating app backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

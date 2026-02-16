@@ -1,4 +1,4 @@
-# Koozi Backend
+# Pingoo Backend
 
 ## Setup
 ```bash

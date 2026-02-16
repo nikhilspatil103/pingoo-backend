@@ -31,5 +31,5 @@ app.post('/api/signup', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Koozi backend running on port ${PORT}`);
+  console.log(`Pingoo backend running on port ${PORT}`);
 });
