@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: koozi-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
