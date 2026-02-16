@@ -5,6 +5,15 @@
 npm install
 ```
 
+## Environment Variables
+Create a `.env` file:
+```
+MONGODB_URI=your_mongodb_atlas_connection_string
+PORT=3000
+```
+
+Get free MongoDB at: https://www.mongodb.com/cloud/atlas
+
 ## Run
 ```bash
 npm run dev

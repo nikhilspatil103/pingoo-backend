@@ -1,33 +1,42 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+const User = require('./models/User');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pingoo';
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 app.use(cors());
 app.use(bodyParser.json());
 
-// In-memory storage (replace with database later)
-const users = [];
-
 // Signup API
-app.post('/api/signup', (req, res) => {
+app.post('/api/signup', async (req, res) => {
   const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'All fields are required' });
   }
 
-  const existingUser = users.find(u => u.email === email);
-  if (existingUser) {
-    return res.status(400).json({ error: 'Email already exists' });
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+
+    const user = new User({ name, email, password });
+    await user.save();
+
+    res.status(201).json({ message: 'User created successfully', userId: user._id });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
   }
-
-  const user = { id: users.length + 1, name, email, password };
-  users.push(user);
-
-  res.status(201).json({ message: 'User created successfully', userId: user.id });
 });
 
 app.listen(PORT, () => {
