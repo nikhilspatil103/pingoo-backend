@@ -14,7 +14,9 @@ mongoose.connect(MONGODB_URI)
   .catch(err => console.error('MongoDB connection error:', err));
 
 app.use(cors({
-  origin: ['http://localhost:19006', 'http://localhost:19000', 'https://pingoo-frontend.onrender.com'],
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 app.use(bodyParser.json());
