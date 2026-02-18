@@ -13,7 +13,10 @@ mongoose.connect(MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:19006', 'http://localhost:19000', 'https://pingoo-frontend.onrender.com'],
+  credentials: true
+}));
 app.use(bodyParser.json());
 
 // Signup API
