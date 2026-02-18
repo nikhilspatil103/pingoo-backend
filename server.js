@@ -3,7 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 const User = require('./models/User');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,18 +57,34 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const user = await User.findOne({ email });
-    if (!user) {
+    if (!user || user.password !== password) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    if (user.password !== password) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    res.status(200).json({ message: 'Login successful', userId: user._id, name: user.name });
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(200).json({ token, userId: user._id, name: user.name, email: user.email });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+// Auth middleware
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+// Logout API
+app.post('/api/logout', authMiddleware, (req, res) => {
+  res.status(200).json({ message: 'Logout successful' });
 });
 
 app.listen(PORT, () => {
