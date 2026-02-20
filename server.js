@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 
 // Cloudinary config
 cloudinary.config({
@@ -27,6 +29,13 @@ const upload = multer({
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pingoo';
 
@@ -500,6 +509,39 @@ app.get('/api/user/:userId', authMiddleware, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Socket.IO connection handling
+const connectedUsers = new Map();
+
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  socket.on('join', (userId) => {
+    connectedUsers.set(userId, socket.id);
+    socket.userId = userId;
+    console.log(`User ${userId} joined with socket ${socket.id}`);
+  });
+
+  socket.on('sendMessage', (data) => {
+    const { receiverId, message, senderId } = data;
+    const receiverSocketId = connectedUsers.get(receiverId);
+    
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('receiveMessage', {
+        senderId,
+        message,
+        timestamp: new Date()
+      });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    if (socket.userId) {
+      connectedUsers.delete(socket.userId);
+      console.log(`User ${socket.userId} disconnected`);
+    }
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`Pingoo backend running on port ${PORT}`);
 });
