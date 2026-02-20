@@ -5,6 +5,24 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
+const cloudinary = require('cloudinary').v2;
+const multer = require('multer');
+
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+});
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -22,14 +40,19 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
 // Signup API
 app.post('/api/signup', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, age, gender, profilePhoto } = req.body;
 
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'All fields are required' });
+  if (!name || !email || !password || !age || !gender) {
+    return res.status(400).json({ error: 'Name, email, password, age, and gender are required' });
+  }
+
+  if (age < 18) {
+    return res.status(400).json({ error: 'You must be at least 18 years old' });
   }
 
   try {
@@ -38,10 +61,27 @@ app.post('/api/signup', async (req, res) => {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    const user = new User({ name, email, password });
+    const user = new User({ name, email, password, age, gender, profilePhoto: profilePhoto || null });
     await user.save();
 
-    res.status(201).json({ message: 'User created successfully', userId: user._id });
+    // Generate token for auto-login after signup
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    
+    // Set user as online
+    await User.findByIdAndUpdate(user._id, { 
+      isOnline: true, 
+      lastSeen: new Date() 
+    });
+
+    res.status(201).json({ 
+      message: 'User created successfully', 
+      token, 
+      user: { 
+        userId: user._id, 
+        name: user.name, 
+        email: user.email 
+      } 
+    });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -61,6 +101,12 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Update user online status
+    await User.findByIdAndUpdate(user._id, { 
+      isOnline: true, 
+      lastSeen: new Date() 
+    });
+
     const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.status(200).json({ token, userId: user._id, name: user.name, email: user.email });
   } catch (error) {
@@ -70,21 +116,388 @@ app.post('/api/login', async (req, res) => {
 
 // Auth middleware
 const authMiddleware = (req, res, next) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  const authHeader = req.headers.authorization;
+  console.log('Auth header:', authHeader);
+  
+  const token = authHeader?.replace('Bearer ', '');
+  console.log('Extracted token:', token);
+  
+  if (!token) {
+    console.log('No token provided');
+    return res.status(401).json({ error: 'No token provided' });
+  }
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Decoded token:', decoded);
     req.user = decoded;
     next();
   } catch (error) {
+    console.log('Token verification error:', error.message);
     res.status(401).json({ error: 'Invalid token' });
   }
 };
 
 // Logout API
-app.post('/api/logout', authMiddleware, (req, res) => {
-  res.status(200).json({ message: 'Logout successful' });
+app.post('/api/logout', authMiddleware, async (req, res) => {
+  try {
+    // Update user offline status
+    await User.findByIdAndUpdate(req.user.userId, { 
+      isOnline: false, 
+      lastSeen: new Date() 
+    });
+    
+    res.status(200).json({ message: 'Logout successful' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all users API
+app.get('/api/users', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    
+    // Get all users except the current user
+    const users = await User.find(
+      { _id: { $ne: currentUserId } },
+      { password: 0 } // Exclude password from response
+    ).sort({ isOnline: -1, lastSeen: -1 }); // Sort by online status first, then by last seen
+    
+    // Transform users data for frontend
+    const transformedUsers = users.map(user => ({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      age: user.age,
+      gender: user.gender,
+      profilePhoto: user.profilePhoto,
+      location: user.location,
+      interests: user.interests || [],
+      isOnline: user.isOnline,
+      lastSeen: user.lastSeen,
+      createdAt: user.createdAt
+    }));
+    
+    res.status(200).json({ users: transformedUsers });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update profile API
+app.put('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const updateData = req.body;
+    
+    console.log('Update profile request for user:', userId);
+    console.log('Update data received:', updateData);
+    
+    // Remove sensitive fields that shouldn't be updated via this endpoint
+    delete updateData.password;
+    delete updateData.email;
+    delete updateData._id;
+    
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { ...updateData, lastSeen: new Date() },
+      { new: true, select: '-password' }
+    );
+    
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    console.log('Profile updated successfully for user:', userId);
+    
+    res.status(200).json({ 
+      message: 'Profile updated successfully',
+      user: {
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        age: updatedUser.age,
+        gender: updatedUser.gender,
+        profilePhoto: updatedUser.profilePhoto,
+        additionalPhotos: updatedUser.additionalPhotos || [],
+        location: updatedUser.location,
+        interests: updatedUser.interests || [],
+        interestedIn: updatedUser.interestedIn,
+        bio: updatedUser.bio,
+        height: updatedUser.height,
+        bodyType: updatedUser.bodyType,
+        smoking: updatedUser.smoking,
+        drinking: updatedUser.drinking,
+        exercise: updatedUser.exercise,
+        diet: updatedUser.diet,
+        occupation: updatedUser.occupation,
+        company: updatedUser.company,
+        graduation: updatedUser.graduation,
+        school: updatedUser.school,
+        hometown: updatedUser.hometown,
+        currentCity: updatedUser.currentCity,
+        lookingFor: updatedUser.lookingFor,
+        relationshipStatus: updatedUser.relationshipStatus,
+        kids: updatedUser.kids,
+        languages: updatedUser.languages || [],
+        isOnline: updatedUser.isOnline,
+        lastSeen: updatedUser.lastSeen,
+        createdAt: updatedUser.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get current user profile API
+app.get('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const user = await User.findById(userId, { password: 0 });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.status(200).json({ 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        age: user.age,
+        gender: user.gender,
+        profilePhoto: user.profilePhoto,
+        additionalPhotos: user.additionalPhotos || [],
+        location: user.location,
+        interests: user.interests || [],
+        bio: user.bio,
+        height: user.height,
+        bodyType: user.bodyType,
+        smoking: user.smoking,
+        drinking: user.drinking,
+        exercise: user.exercise,
+        diet: user.diet,
+        occupation: user.occupation,
+        company: user.company,
+        graduation: user.graduation,
+        school: user.school,
+        hometown: user.hometown,
+        currentCity: user.currentCity,
+        lookingFor: user.lookingFor,
+        relationshipStatus: user.relationshipStatus,
+        kids: user.kids,
+        languages: user.languages || [],
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Upload image endpoint (base64)
+app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
+  try {
+    console.log('Base64 upload request received');
+    
+    const { image, filename } = req.body;
+    
+    if (!image) {
+      console.log('No image data provided');
+      return res.status(400).json({ error: 'No image data provided' });
+    }
+    
+    console.log('Uploading base64 image to Cloudinary');
+    
+    const result = await cloudinary.uploader.upload(image, {
+      folder: 'pingoo-profiles',
+      public_id: `profile_${Date.now()}`,
+      transformation: [
+        { width: 400, height: 400, crop: 'fill' },
+        { quality: 'auto' }
+      ]
+    });
+
+    console.log('Cloudinary result:', result.secure_url);
+
+    res.status(200).json({ 
+      message: 'Image uploaded successfully',
+      imageUrl: result.secure_url 
+    });
+  } catch (error) {
+    console.error('Error uploading base64 image:', error);
+    res.status(500).json({ error: 'Failed to upload image', details: error.message });
+  }
+});
+
+// Delete photo API
+app.delete('/api/delete-photo', authMiddleware, async (req, res) => {
+  try {
+    const { photoUrl, isProfilePhoto } = req.body;
+    const userId = req.user.userId;
+    
+    if (!photoUrl) {
+      return res.status(400).json({ error: 'Photo URL is required' });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Extract public_id from Cloudinary URL for deletion
+    const publicId = photoUrl.split('/').pop().split('.')[0];
+    
+    try {
+      await cloudinary.uploader.destroy(`pingoo-profiles/${publicId}`);
+    } catch (cloudinaryError) {
+      console.log('Cloudinary deletion error:', cloudinaryError);
+    }
+    
+    if (isProfilePhoto) {
+      user.profilePhoto = null;
+    } else {
+      user.additionalPhotos = user.additionalPhotos.filter(photo => photo !== photoUrl);
+    }
+    
+    await user.save();
+    
+    res.status(200).json({ 
+      message: 'Photo deleted successfully',
+      user: {
+        id: user._id,
+        profilePhoto: user.profilePhoto,
+        additionalPhotos: user.additionalPhotos || []
+      }
+    });
+  } catch (error) {
+    console.error('Error deleting photo:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Set profile photo API
+app.put('/api/set-profile-photo', authMiddleware, async (req, res) => {
+  try {
+    const { photoUrl } = req.body;
+    const userId = req.user.userId;
+    
+    if (!photoUrl) {
+      return res.status(400).json({ error: 'Photo URL is required' });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // If there's already a profile photo, move it to additional photos
+    if (user.profilePhoto && user.profilePhoto !== photoUrl) {
+      if (!user.additionalPhotos.includes(user.profilePhoto)) {
+        user.additionalPhotos.push(user.profilePhoto);
+      }
+    }
+    
+    // Set new profile photo and remove from additional photos if it exists there
+    user.profilePhoto = photoUrl;
+    user.additionalPhotos = user.additionalPhotos.filter(photo => photo !== photoUrl);
+    
+    await user.save();
+    
+    res.status(200).json({ 
+      message: 'Profile photo updated successfully',
+      user: {
+        id: user._id,
+        profilePhoto: user.profilePhoto,
+        additionalPhotos: user.additionalPhotos || []
+      }
+    });
+  } catch (error) {
+    console.error('Error setting profile photo:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update location API
+app.put('/api/location', authMiddleware, async (req, res) => {
+  try {
+    const { latitude, longitude, location } = req.body;
+    const userId = req.user.userId;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+    
+    await User.findByIdAndUpdate(userId, {
+      latitude,
+      longitude,
+      location: location || 'Unknown',
+      lastSeen: new Date()
+    });
+    
+    res.status(200).json({ message: 'Location updated successfully' });
+  } catch (error) {
+    console.error('Error updating location:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get user profile by ID API
+app.get('/api/user/:userId', authMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId, { password: 0 });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.status(200).json({ 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        age: user.age,
+        gender: user.gender,
+        profilePhoto: user.profilePhoto,
+        additionalPhotos: user.additionalPhotos || [],
+        location: user.location,
+        interests: user.interests || [],
+        bio: user.bio,
+        height: user.height,
+        bodyType: user.bodyType,
+        smoking: user.smoking,
+        drinking: user.drinking,
+        exercise: user.exercise,
+        diet: user.diet,
+        occupation: user.occupation,
+        company: user.company,
+        graduation: user.graduation,
+        school: user.school,
+        hometown: user.hometown,
+        currentCity: user.currentCity,
+        lookingFor: user.lookingFor,
+        relationshipStatus: user.relationshipStatus,
+        kids: user.kids,
+        languages: user.languages || [],
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 app.listen(PORT, () => {
