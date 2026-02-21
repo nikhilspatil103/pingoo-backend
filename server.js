@@ -4,10 +4,13 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const validator = require('validator');
 const User = require('./models/User');
 const Message = require('./models/Message');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
+const redis = require('redis');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 
@@ -29,6 +32,78 @@ const upload = multer({
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// Redis client setup (optional)
+let redisClient = null;
+let redisConnected = false;
+
+try {
+  redisClient = redis.createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    socket: {
+      reconnectStrategy: () => false // Don't reconnect if fails
+    }
+  });
+
+  redisClient.on('error', (err) => {
+    console.log('Redis not available, running without cache');
+    redisConnected = false;
+  });
+  
+  redisClient.on('connect', () => {
+    console.log('Redis connected');
+    redisConnected = true;
+  });
+
+  // Connect to Redis (optional)
+  (async () => {
+    try {
+      await redisClient.connect();
+    } catch (error) {
+      console.log('Redis not available, running without cache');
+      redisConnected = false;
+    }
+  })();
+} catch (error) {
+  console.log('Redis not available, running without cache');
+  redisConnected = false;
+}
+
+// Cache helper functions
+const CACHE_TTL = {
+  USER_PROFILE: 300,
+  ONLINE_USERS: 60,
+  LIKE_COUNTS: 300,
+  CLOUDINARY_URL: 86400
+};
+
+const getCache = async (key) => {
+  if (!redisConnected || !redisClient) return null;
+  try {
+    const data = await redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const setCache = async (key, value, ttl = 300) => {
+  if (!redisConnected || !redisClient) return;
+  try {
+    await redisClient.setEx(key, ttl, JSON.stringify(value));
+  } catch (error) {
+    // Silently fail
+  }
+};
+
+const deleteCache = async (key) => {
+  if (!redisConnected || !redisClient) return;
+  try {
+    await redisClient.del(key);
+  } catch (error) {
+    // Silently fail
+  }
+};
+
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
@@ -40,9 +115,32 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pingoo';
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('MongoDB connected'))
+// Database connection with pooling
+mongoose.connect(MONGODB_URI, {
+  maxPoolSize: 10,
+  minPoolSize: 5,
+  socketTimeoutMS: 45000,
+  serverSelectionTimeoutMS: 5000,
+})
+  .then(() => {
+    console.log('MongoDB connected with connection pooling');
+    createIndexes();
+  })
   .catch(err => console.error('MongoDB connection error:', err));
+
+// Create database indexes for performance
+const createIndexes = async () => {
+  try {
+    await User.collection.createIndex({ isOnline: -1 });
+    await User.collection.createIndex({ lastSeen: -1 });
+    await User.collection.createIndex({ location: 1 });
+    await User.collection.createIndex({ gender: 1 });
+    await User.collection.createIndex({ isOnline: -1, lastSeen: -1 });
+    console.log('Database indexes created successfully');
+  } catch (error) {
+    console.error('Error creating indexes:', error);
+  }
+};
 
 app.use(cors({
   origin: '*',
@@ -61,17 +159,39 @@ app.post('/api/signup', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, password, age, and gender are required' });
   }
 
+  // Input sanitization
+  const sanitizedName = validator.escape(validator.trim(name));
+  const sanitizedEmail = validator.normalizeEmail(email);
+  
+  if (!validator.isEmail(sanitizedEmail)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
   if (age < 18) {
     return res.status(400).json({ error: 'You must be at least 18 years old' });
   }
 
   try {
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: sanitizedEmail });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    const user = new User({ name, email, password, age, gender, profilePhoto: profilePhoto || null });
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = new User({ 
+      name: sanitizedName, 
+      email: sanitizedEmail, 
+      password: hashedPassword, 
+      age, 
+      gender, 
+      profilePhoto: profilePhoto || null 
+    });
     await user.save();
 
     // Generate token for auto-login after signup
@@ -105,9 +225,22 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
+  // Input sanitization
+  const sanitizedEmail = validator.normalizeEmail(email);
+  
+  if (!validator.isEmail(sanitizedEmail)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
   try {
-    const user = await User.findOne({ email });
-    if (!user || user.password !== password) {
+    const user = await User.findOne({ email: sanitizedEmail });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Compare hashed password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -167,31 +300,46 @@ app.post('/api/logout', authMiddleware, async (req, res) => {
 app.get('/api/users', authMiddleware, async (req, res) => {
   try {
     const currentUserId = req.user.userId;
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const skip = (page - 1) * limit;
     
-    // Get all users except the current user
+    // Check cache for online users list
+    const cacheKey = `users:page:${page}:limit:${limit}`;
+    const cachedUsers = await getCache(cacheKey);
+    
+    if (cachedUsers) {
+      return res.status(200).json({ users: cachedUsers, page, limit, cached: true });
+    }
+    
+    // Optimized query with projection and lean()
     const users = await User.find(
-      { _id: { $ne: currentUserId } },
-      { password: 0 } // Exclude password from response
-    ).sort({ isOnline: -1, lastSeen: -1 }); // Sort by online status first, then by last seen
+      { _id: { $ne: currentUserId } }
+    )
+    .select('name age gender profilePhoto location lookingFor isOnline lastSeen likes')
+    .sort({ isOnline: -1, lastSeen: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
     
     // Transform users data for frontend
     const transformedUsers = users.map(user => ({
       id: user._id,
       name: user.name,
-      email: user.email,
       age: user.age,
       gender: user.gender,
       profilePhoto: user.profilePhoto,
       location: user.location,
-      interests: user.interests || [],
       lookingFor: user.lookingFor,
       isOnline: user.isOnline,
       lastSeen: user.lastSeen,
-      createdAt: user.createdAt,
       likesCount: user.likes?.length || 0
     }));
     
-    res.status(200).json({ users: transformedUsers });
+    // Cache the result for 1 minute (online status changes frequently)
+    await setCache(cacheKey, transformedUsers, CACHE_TTL.ONLINE_USERS);
+    
+    res.status(200).json({ users: transformedUsers, page, limit });
   } catch (error) {
     console.error('Error fetching users:', error);
     res.status(500).json({ error: 'Server error' });
@@ -204,10 +352,7 @@ app.put('/api/profile', authMiddleware, async (req, res) => {
     const userId = req.user.userId;
     const updateData = req.body;
     
-    console.log('Update profile request for user:', userId);
-    console.log('Update data received:', updateData);
-    
-    // Remove sensitive fields that shouldn't be updated via this endpoint
+    // Remove sensitive fields
     delete updateData.password;
     delete updateData.email;
     delete updateData._id;
@@ -222,7 +367,8 @@ app.put('/api/profile', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    console.log('Profile updated successfully for user:', userId);
+    // Invalidate profile cache after update
+    await deleteCache(`profile:${userId}`);
     
     res.status(200).json({ 
       message: 'Profile updated successfully',
@@ -270,46 +416,57 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
     
+    // Check cache for user profile
+    const cacheKey = `profile:${userId}`;
+    const cachedProfile = await getCache(cacheKey);
+    
+    if (cachedProfile) {
+      return res.status(200).json({ user: cachedProfile, cached: true });
+    }
+    
     const user = await User.findById(userId, { password: 0 });
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.status(200).json({ 
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        age: user.age,
-        gender: user.gender,
-        profilePhoto: user.profilePhoto,
-        additionalPhotos: user.additionalPhotos || [],
-        location: user.location,
-        interests: user.interests || [],
-        bio: user.bio,
-        height: user.height,
-        bodyType: user.bodyType,
-        smoking: user.smoking,
-        drinking: user.drinking,
-        exercise: user.exercise,
-        diet: user.diet,
-        occupation: user.occupation,
-        company: user.company,
-        graduation: user.graduation,
-        school: user.school,
-        hometown: user.hometown,
-        currentCity: user.currentCity,
-        lookingFor: user.lookingFor,
-        relationshipStatus: user.relationshipStatus,
-        kids: user.kids,
-        languages: user.languages || [],
-        likes: user.likes || [],
-        isOnline: user.isOnline,
-        lastSeen: user.lastSeen,
-        createdAt: user.createdAt
-      }
-    });
+    const userProfile = {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      age: user.age,
+      gender: user.gender,
+      profilePhoto: user.profilePhoto,
+      additionalPhotos: user.additionalPhotos || [],
+      location: user.location,
+      interests: user.interests || [],
+      bio: user.bio,
+      height: user.height,
+      bodyType: user.bodyType,
+      smoking: user.smoking,
+      drinking: user.drinking,
+      exercise: user.exercise,
+      diet: user.diet,
+      occupation: user.occupation,
+      company: user.company,
+      graduation: user.graduation,
+      school: user.school,
+      hometown: user.hometown,
+      currentCity: user.currentCity,
+      lookingFor: user.lookingFor,
+      relationshipStatus: user.relationshipStatus,
+      kids: user.kids,
+      languages: user.languages || [],
+      likes: user.likes || [],
+      isOnline: user.isOnline,
+      lastSeen: user.lastSeen,
+      createdAt: user.createdAt
+    };
+    
+    // Cache profile for 5 minutes
+    await setCache(cacheKey, userProfile, CACHE_TTL.USER_PROFILE);
+    
+    res.status(200).json({ user: userProfile });
   } catch (error) {
     console.error('Error fetching profile:', error);
     res.status(500).json({ error: 'Server error' });
@@ -319,16 +476,11 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 // Upload image endpoint (base64) - Public for signup
 app.post('/api/upload-image-public', async (req, res) => {
   try {
-    console.log('Public base64 upload request received');
-    
     const { image, filename } = req.body;
     
     if (!image) {
-      console.log('No image data provided');
       return res.status(400).json({ error: 'No image data provided' });
     }
-    
-    console.log('Uploading base64 image to Cloudinary');
     
     const result = await cloudinary.uploader.upload(image, {
       folder: 'pingoo-profiles',
@@ -339,7 +491,8 @@ app.post('/api/upload-image-public', async (req, res) => {
       ]
     });
 
-    console.log('Cloudinary result:', result.secure_url);
+    // Cache Cloudinary URL for 24 hours
+    await setCache(`cloudinary:${result.public_id}`, result.secure_url, CACHE_TTL.CLOUDINARY_URL);
 
     res.status(200).json({ 
       message: 'Image uploaded successfully',
@@ -374,7 +527,8 @@ app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
       ]
     });
 
-    console.log('Cloudinary result:', result.secure_url);
+    // Cache Cloudinary URL for 24 hours
+    await setCache(`cloudinary:${result.public_id}`, result.secure_url, CACHE_TTL.CLOUDINARY_URL);
 
     res.status(200).json({ 
       message: 'Image uploaded successfully',
@@ -662,6 +816,10 @@ app.post('/api/like/:userId', authMiddleware, async (req, res) => {
     }
     
     await user.save();
+    
+    // Invalidate like count cache
+    await deleteCache(`likes:${userId}`);
+    await deleteCache(`profile:${userId}`);
     
     res.status(200).json({ 
       message: isLiked ? 'Unliked' : 'Liked',
