@@ -316,6 +316,41 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// Upload image endpoint (base64) - Public for signup
+app.post('/api/upload-image-public', async (req, res) => {
+  try {
+    console.log('Public base64 upload request received');
+    
+    const { image, filename } = req.body;
+    
+    if (!image) {
+      console.log('No image data provided');
+      return res.status(400).json({ error: 'No image data provided' });
+    }
+    
+    console.log('Uploading base64 image to Cloudinary');
+    
+    const result = await cloudinary.uploader.upload(image, {
+      folder: 'pingoo-profiles',
+      public_id: `profile_${Date.now()}`,
+      transformation: [
+        { width: 400, height: 400, crop: 'fill' },
+        { quality: 'auto' }
+      ]
+    });
+
+    console.log('Cloudinary result:', result.secure_url);
+
+    res.status(200).json({ 
+      message: 'Image uploaded successfully',
+      imageUrl: result.secure_url 
+    });
+  } catch (error) {
+    console.error('Error uploading base64 image:', error);
+    res.status(500).json({ error: 'Failed to upload image', details: error.message });
+  }
+});
+
 // Upload image endpoint (base64)
 app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
   try {
