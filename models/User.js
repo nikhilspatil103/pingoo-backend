@@ -30,6 +30,7 @@ const userSchema = new mongoose.Schema({
   relationshipStatus: { type: String },
   kids: { type: String },
   languages: [{ type: String }],
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }

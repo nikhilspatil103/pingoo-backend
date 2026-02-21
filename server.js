@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
+const Message = require('./models/Message');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const { createServer } = require('http');
@@ -183,9 +184,11 @@ app.get('/api/users', authMiddleware, async (req, res) => {
       profilePhoto: user.profilePhoto,
       location: user.location,
       interests: user.interests || [],
+      lookingFor: user.lookingFor,
       isOnline: user.isOnline,
       lastSeen: user.lastSeen,
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      likesCount: user.likes?.length || 0
     }));
     
     res.status(200).json({ users: transformedUsers });
@@ -301,6 +304,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
         relationshipStatus: user.relationshipStatus,
         kids: user.kids,
         languages: user.languages || [],
+        likes: user.likes || [],
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
         createdAt: user.createdAt
@@ -515,31 +519,256 @@ const connectedUsers = new Map();
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join', (userId) => {
+  socket.on('join', async (userId) => {
     connectedUsers.set(userId, socket.id);
     socket.userId = userId;
     console.log(`User ${userId} joined with socket ${socket.id}`);
+    
+    // Set user as online
+    try {
+      await User.findByIdAndUpdate(userId, { 
+        isOnline: true, 
+        lastSeen: new Date() 
+      });
+    } catch (error) {
+      console.error('Error updating user online status:', error);
+    }
   });
 
-  socket.on('sendMessage', (data) => {
+  socket.on('sendMessage', async (data) => {
     const { receiverId, message, senderId } = data;
-    const receiverSocketId = connectedUsers.get(receiverId);
     
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('receiveMessage', {
+    try {
+      // Save message to database
+      const newMessage = new Message({
         senderId,
+        receiverId,
         message,
         timestamp: new Date()
       });
+      await newMessage.save();
+      
+      // Send to receiver if online
+      const receiverSocketId = connectedUsers.get(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('receiveMessage', {
+          senderId,
+          message,
+          timestamp: new Date()
+        });
+      }
+    } catch (error) {
+      console.error('Error saving message:', error);
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     if (socket.userId) {
       connectedUsers.delete(socket.userId);
       console.log(`User ${socket.userId} disconnected`);
+      
+      // Set user as offline
+      try {
+        await User.findByIdAndUpdate(socket.userId, { 
+          isOnline: false, 
+          lastSeen: new Date() 
+        });
+      } catch (error) {
+        console.error('Error updating user offline status:', error);
+      }
     }
   });
+});
+
+// Mark messages as read API
+app.put('/api/messages/read/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    await Message.updateMany(
+      {
+        senderId: userId,
+        receiverId: currentUserId,
+        isRead: false
+      },
+      { isRead: true }
+    );
+    
+    res.status(200).json({ message: 'Messages marked as read' });
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Like/Unlike user API
+app.post('/api/like/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    if (currentUserId === userId) {
+      return res.status(400).json({ error: 'Cannot like yourself' });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const likes = user.likes || [];
+    const isLiked = likes.some(id => id.toString() === currentUserId);
+    
+    if (isLiked) {
+      user.likes = likes.filter(id => id.toString() !== currentUserId);
+    } else {
+      user.likes = [...likes, currentUserId];
+    }
+    
+    await user.save();
+    
+    res.status(200).json({ 
+      message: isLiked ? 'Unliked' : 'Liked',
+      isLiked: !isLiked,
+      likeCount: user.likes.length
+    });
+  } catch (error) {
+    console.error('Error liking user:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get like status for a user API
+app.get('/api/like-status/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const likes = user.likes || [];
+    const isLiked = likes.some(id => id.toString() === currentUserId);
+    
+    res.status(200).json({ 
+      isLiked,
+      likeCount: likes.length
+    });
+  } catch (error) {
+    console.error('Error getting like status:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get chat history API
+app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    const messages = await Message.find({
+      $or: [
+        { senderId: currentUserId, receiverId: userId },
+        { senderId: userId, receiverId: currentUserId }
+      ]
+    }).sort({ timestamp: 1 });
+    
+    const formattedMessages = messages.map(msg => ({
+      id: msg._id,
+      text: msg.message,
+      sent: msg.senderId.toString() === currentUserId,
+      time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: msg.timestamp
+    }));
+    
+    res.status(200).json({ messages: formattedMessages });
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get conversations API
+app.get('/api/conversations', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const conversations = await Message.aggregate([
+      {
+        $match: {
+          $or: [
+            { senderId: new mongoose.Types.ObjectId(userId) },
+            { receiverId: new mongoose.Types.ObjectId(userId) }
+          ]
+        }
+      },
+      {
+        $sort: { timestamp: -1 }
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $eq: ['$senderId', new mongoose.Types.ObjectId(userId)] },
+              '$receiverId',
+              '$senderId'
+            ]
+          },
+          lastMessage: { $first: '$message' },
+          lastMessageTime: { $first: '$timestamp' },
+          isFromMe: { $first: { $eq: ['$senderId', new mongoose.Types.ObjectId(userId)] } },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$isRead', false] },
+                    { $ne: ['$senderId', new mongoose.Types.ObjectId(userId)] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $project: {
+          id: '$_id',
+          name: '$user.name',
+          age: '$user.age',
+          profilePhoto: '$user.profilePhoto',
+          lastMessage: 1,
+          lastMessageTime: 1,
+          isFromMe: 1,
+          unreadCount: 1
+        }
+      },
+      {
+        $sort: { lastMessageTime: -1 }
+      }
+    ]);
+    
+    res.status(200).json({ conversations });
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 server.listen(PORT, () => {
