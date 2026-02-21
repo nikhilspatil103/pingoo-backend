@@ -151,6 +151,20 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'Server is running',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    redis: redisConnected ? 'connected' : 'disconnected'
+  });
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({ message: 'Pingoo API is running' });
+});
+
 // Signup API
 app.post('/api/signup', async (req, res) => {
   const { name, email, password, age, gender, profilePhoto } = req.body;
