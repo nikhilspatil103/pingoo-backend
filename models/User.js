@@ -31,6 +31,12 @@ const userSchema = new mongoose.Schema({
   kids: { type: String },
   languages: [{ type: String }],
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  reports: [{
+    reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason: { type: String },
+    timestamp: { type: Date, default: Date.now }
+  }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
