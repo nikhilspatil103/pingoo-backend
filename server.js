@@ -167,7 +167,7 @@ app.get('/', (req, res) => {
 
 // Signup API
 app.post('/api/signup', async (req, res) => {
-  const { name, email, password, age, gender, profilePhoto } = req.body;
+  const { name, email, password, age, gender, interestedIn, lookingFor, profilePhoto } = req.body;
 
   if (!name || !email || !password || !age || !gender) {
     return res.status(400).json({ error: 'Name, email, password, age, and gender are required' });
@@ -204,6 +204,8 @@ app.post('/api/signup', async (req, res) => {
       password: hashedPassword, 
       age, 
       gender, 
+      interestedIn: interestedIn || null,
+      lookingFor: lookingFor || null,
       profilePhoto: profilePhoto || null 
     });
     await user.save();
@@ -318,12 +320,22 @@ app.get('/api/users', authMiddleware, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const skip = (page - 1) * limit;
     
-    // Get current user's blocked list
-    const currentUser = await User.findById(currentUserId).select('blockedUsers');
+    // Get current user's blocked list and interested in preference
+    const currentUser = await User.findById(currentUserId).select('blockedUsers interestedIn');
     const blockedUsers = currentUser?.blockedUsers || [];
+    const interestedIn = currentUser?.interestedIn;
+    
+    // Build gender filter based on interestedIn
+    let genderFilter = {};
+    if (interestedIn === 'male') {
+      genderFilter = { gender: 'male' };
+    } else if (interestedIn === 'female') {
+      genderFilter = { gender: 'female' };
+    }
+    // If interestedIn is 'both' or not set, show all genders
     
     // Check cache for online users list
-    const cacheKey = `users:page:${page}:limit:${limit}`;
+    const cacheKey = `users:page:${page}:limit:${limit}:interest:${interestedIn}`;
     const cachedUsers = await getCache(cacheKey);
     
     if (cachedUsers) {
@@ -332,13 +344,14 @@ app.get('/api/users', authMiddleware, async (req, res) => {
       return res.status(200).json({ users: filteredUsers, page, limit, cached: true });
     }
     
-    // Optimized query with projection and lean() - exclude blocked users
+    // Optimized query with projection and lean() - exclude blocked users and filter by gender
     const users = await User.find(
       { 
         _id: { 
           $ne: currentUserId,
           $nin: blockedUsers
-        }
+        },
+        ...genderFilter
       }
     )
     .select('name age gender profilePhoto location lookingFor isOnline lastSeen likes')
@@ -461,6 +474,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
       email: user.email,
       age: user.age,
       gender: user.gender,
+      interestedIn: user.interestedIn,
       profilePhoto: user.profilePhoto,
       additionalPhotos: user.additionalPhotos || [],
       location: user.location,
