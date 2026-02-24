@@ -928,10 +928,6 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    // Get current user's blocked list
-    const currentUser = await User.findById(userId).select('blockedUsers');
-    const blockedUsers = currentUser?.blockedUsers || [];
-    
     const conversations = await Message.aggregate([
       {
         $match: {
@@ -970,11 +966,6 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
               ]
             }
           }
-        }
-      },
-      {
-        $match: {
-          _id: { $nin: blockedUsers }
         }
       },
       {
@@ -1072,7 +1063,7 @@ app.get('/api/blocked-users', authMiddleware, async (req, res) => {
     }
     
     const blockedUsers = (user.blockedUsers || []).map(u => ({
-      id: u._id,
+      _id: u._id,
       name: u.name,
       age: u.age,
       profilePhoto: u.profilePhoto
