@@ -1076,6 +1076,26 @@ app.get('/api/blocked-users', authMiddleware, async (req, res) => {
   }
 });
 
+// Check if blocked by user API
+app.get('/api/blocked-by/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId).select('blockedUsers');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const isBlockedByUser = (user.blockedUsers || []).some(id => id.toString() === currentUserId);
+    
+    res.status(200).json({ isBlockedByUser });
+  } catch (error) {
+    console.error('Error checking block status:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Report user API
 app.post('/api/report/:userId', authMiddleware, async (req, res) => {
   try {
