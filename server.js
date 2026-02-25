@@ -790,6 +790,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('typing', (data) => {
+    const { receiverId, userId } = data;
+    const receiverSocketId = connectedUsers.get(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('userTyping', { userId });
+    }
+  });
+
+  socket.on('stopTyping', (data) => {
+    const { receiverId, userId } = data;
+    const receiverSocketId = connectedUsers.get(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('userStopTyping', { userId });
+    }
+  });
+
   socket.on('disconnect', async () => {
     if (socket.userId) {
       connectedUsers.delete(socket.userId);
