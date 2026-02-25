@@ -497,6 +497,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
       kids: user.kids,
       languages: user.languages || [],
       likes: user.likes || [],
+      coins: user.coins || 0,
       isOnline: user.isOnline,
       lastSeen: user.lastSeen,
       createdAt: user.createdAt
@@ -935,6 +936,89 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
     res.status(200).json({ messages: formattedMessages });
   } catch (error) {
     console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Check chat access API
+app.get('/api/chat-access/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    
+    const user = await User.findById(currentUserId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const access = user.chatAccess?.find(a => a.userId.toString() === userId);
+    const hasAccess = access && new Date(access.expiresAt) > new Date();
+    
+    res.status(200).json({ 
+      hasAccess,
+      expiresAt: access?.expiresAt,
+      coins: user.coins
+    });
+  } catch (error) {
+    console.error('Error checking chat access:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Purchase chat access API
+app.post('/api/purchase-chat/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    const CHAT_COST = 10;
+    const CHAT_DURATION_HOURS = 6;
+    
+    const user = await User.findById(currentUserId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (user.coins < CHAT_COST) {
+      return res.status(400).json({ error: 'Insufficient coins' });
+    }
+    
+    // Deduct coins
+    user.coins -= CHAT_COST;
+    
+    // Add or update chat access
+    const expiresAt = new Date(Date.now() + CHAT_DURATION_HOURS * 60 * 60 * 1000);
+    const existingAccess = user.chatAccess?.findIndex(a => a.userId.toString() === userId);
+    
+    if (existingAccess !== -1) {
+      user.chatAccess[existingAccess].expiresAt = expiresAt;
+    } else {
+      if (!user.chatAccess) user.chatAccess = [];
+      user.chatAccess.push({ userId, expiresAt });
+    }
+    
+    await user.save();
+    
+    res.status(200).json({ 
+      message: 'Chat access purchased',
+      coins: user.coins,
+      expiresAt
+    });
+  } catch (error) {
+    console.error('Error purchasing chat access:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get user coins API
+app.get('/api/coins', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('coins');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.status(200).json({ coins: user.coins });
+  } catch (error) {
+    console.error('Error fetching coins:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

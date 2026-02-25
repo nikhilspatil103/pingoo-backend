@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   age: { type: Number, required: true, min: 18 },
   gender: { type: String, required: true, enum: ['male', 'female', 'other'] },
-  interestedIn: { type: String, enum: ['male', 'female', 'both'] },
+  interestedIn: { type: String, enum: ['male', 'female'] },
   profilePhoto: { type: String },
   additionalPhotos: [{ type: String }],
   location: { type: String },
@@ -36,6 +36,11 @@ const userSchema = new mongoose.Schema({
     reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     reason: { type: String },
     timestamp: { type: Date, default: Date.now }
+  }],
+  coins: { type: Number, default: 50 },
+  chatAccess: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    expiresAt: { type: Date }
   }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
