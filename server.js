@@ -1140,7 +1140,7 @@ app.post('/api/spin-wheel', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'You can only spin once per day' });
     }
     
-    // Weighted random selection: mostly 10, some 20, 30, 50
+    // Segments array matching frontend
     const segments = [10, 20, 10, 30, 10, 20, 10, 50];
     const randomIndex = Math.floor(Math.random() * segments.length);
     const wonCoins = segments[randomIndex];
@@ -1153,11 +1153,14 @@ app.post('/api/spin-wheel', authMiddleware, async (req, res) => {
     // Update user coins and last spin date
     user.coins += wonCoins;
     user.lastSpinDate = now;
+    const nextSpinTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     await user.save();
     
     res.status(200).json({ 
       coins: wonCoins,
-      totalCoins: user.coins
+      segmentIndex: randomIndex,
+      totalCoins: user.coins,
+      nextSpinTime
     });
   } catch (error) {
     console.error('Error spinning wheel:', error);
