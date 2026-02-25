@@ -5,8 +5,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   age: { type: Number, required: true, min: 18 },
-  gender: { type: String, required: true, enum: ['male', 'female', 'other'] },
-  interestedIn: { type: String, enum: ['male', 'female'] },
+  gender: { type: String, required: true, enum: ['male', 'female'] },
+  interestedIn: { type: String, enum: ['male', 'female', 'both'] },
   profilePhoto: { type: String },
   additionalPhotos: [{ type: String }],
   location: { type: String },
@@ -42,6 +42,7 @@ const userSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     expiresAt: { type: Date }
   }],
+  lastSpinDate: { type: Date },
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
