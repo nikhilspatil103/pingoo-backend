@@ -779,15 +779,26 @@ io.on('connection', (socket) => {
       });
       await newMessage.save();
       
-      // Send to receiver if online
+      // Send to receiver if online with database ID
       const receiverSocketId = connectedUsers.get(receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('receiveMessage', {
+          messageId: newMessage._id,
           senderId,
           message: message || '',
           mediaUrl: mediaUrl || null,
           mediaType: mediaType || 'text',
-          timestamp: new Date()
+          timestamp: newMessage.timestamp
+        });
+      }
+      
+      // Send back to sender with database ID
+      const senderSocketId = connectedUsers.get(senderId);
+      if (senderSocketId) {
+        socket.emit('messageSaved', {
+          tempId: data.tempId,
+          messageId: newMessage._id,
+          timestamp: newMessage.timestamp
         });
       }
     } catch (error) {
@@ -808,6 +819,63 @@ io.on('connection', (socket) => {
     const receiverSocketId = connectedUsers.get(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit('userStopTyping', { userId });
+    }
+  });
+
+  socket.on('deleteMessage', async (data) => {
+    const { messageId, receiverId, senderId } = data;
+    
+    try {
+      // Delete message from database
+      await Message.findByIdAndDelete(messageId);
+      
+      // Notify receiver if online
+      const receiverSocketId = connectedUsers.get(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('messageDeleted', {
+          messageId,
+          senderId,
+          receiverId
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+    }
+  });
+
+  socket.on('recallMessage', async (data) => {
+    const { messageId, receiverId, senderId } = data;
+    
+    try {
+      // Update message in database to recalled state
+      const message = await Message.findByIdAndUpdate(
+        messageId,
+        { 
+          message: 'This message was recalled',
+          isRecalled: true,
+          mediaUrl: null,
+          mediaType: 'text'
+        },
+        { new: true }
+      );
+      
+      if (message) {
+        // Get sender name
+        const sender = await User.findById(senderId).select('name');
+        
+        // Notify receiver if online
+        const receiverSocketId = connectedUsers.get(receiverId);
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit('messageRecalled', {
+            messageId,
+            senderId,
+            receiverId,
+            senderName: sender?.name || 'User'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error recalling message:', error);
     }
   });
 
@@ -931,9 +999,10 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
     
     const formattedMessages = messages.map(msg => ({
       id: msg._id,
-      text: msg.message || '',
-      mediaUrl: msg.mediaUrl || null,
-      mediaType: msg.mediaType || 'text',
+      text: msg.isRecalled ? (msg.senderId.toString() === currentUserId ? 'You recalled this message' : 'This message was recalled') : (msg.message || ''),
+      mediaUrl: msg.isRecalled ? null : (msg.mediaUrl || null),
+      mediaType: msg.isRecalled ? 'text' : (msg.mediaType || 'text'),
+      isRecalled: msg.isRecalled || false,
       sent: msg.senderId.toString() === currentUserId,
       time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: msg.timestamp
