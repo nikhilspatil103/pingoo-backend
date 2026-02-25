@@ -1098,6 +1098,73 @@ app.get('/api/coins', authMiddleware, async (req, res) => {
   }
 });
 
+// Check spin availability API
+app.get('/api/spin-availability', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('lastSpinDate');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const now = new Date();
+    const lastSpin = user.lastSpinDate;
+    
+    // Check if 24 hours have passed
+    const canSpin = !lastSpin || (now - new Date(lastSpin)) >= 24 * 60 * 60 * 1000;
+    
+    let nextSpinTime = null;
+    if (!canSpin && lastSpin) {
+      nextSpinTime = new Date(new Date(lastSpin).getTime() + 24 * 60 * 60 * 1000);
+    }
+    
+    res.status(200).json({ canSpin, nextSpinTime });
+  } catch (error) {
+    console.error('Error checking spin availability:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
+  }
+});
+
+// Spin wheel API
+app.post('/api/spin-wheel', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const now = new Date();
+    const lastSpin = user.lastSpinDate;
+    
+    // Check if 24 hours have passed
+    if (lastSpin && (now - lastSpin) < 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'You can only spin once per day' });
+    }
+    
+    // Weighted random selection: mostly 10, some 20, 30, 50
+    const segments = [10, 20, 10, 30, 10, 20, 10, 50];
+    const randomIndex = Math.floor(Math.random() * segments.length);
+    const wonCoins = segments[randomIndex];
+    
+    // Initialize coins if undefined
+    if (typeof user.coins !== 'number') {
+      user.coins = 50;
+    }
+    
+    // Update user coins and last spin date
+    user.coins += wonCoins;
+    user.lastSpinDate = now;
+    await user.save();
+    
+    res.status(200).json({ 
+      coins: wonCoins,
+      totalCoins: user.coins
+    });
+  } catch (error) {
+    console.error('Error spinning wheel:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
+  }
+});
+
 // Get conversations API
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   try {
