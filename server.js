@@ -765,14 +765,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('sendMessage', async (data) => {
-    const { receiverId, message, senderId } = data;
+    const { receiverId, message, senderId, mediaUrl, mediaType } = data;
     
     try {
       // Save message to database
       const newMessage = new Message({
         senderId,
         receiverId,
-        message,
+        message: message || '',
+        mediaUrl: mediaUrl || null,
+        mediaType: mediaType || 'text',
         timestamp: new Date()
       });
       await newMessage.save();
@@ -782,7 +784,9 @@ io.on('connection', (socket) => {
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('receiveMessage', {
           senderId,
-          message,
+          message: message || '',
+          mediaUrl: mediaUrl || null,
+          mediaType: mediaType || 'text',
           timestamp: new Date()
         });
       }
@@ -927,7 +931,9 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
     
     const formattedMessages = messages.map(msg => ({
       id: msg._id,
-      text: msg.message,
+      text: msg.message || '',
+      mediaUrl: msg.mediaUrl || null,
+      mediaType: msg.mediaType || 'text',
       sent: msg.senderId.toString() === currentUserId,
       time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: msg.timestamp
