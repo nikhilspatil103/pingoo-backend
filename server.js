@@ -836,6 +836,8 @@ io.on('connection', (socket) => {
       const sender = await User.findById(senderId).select('name');
       const receiver = await User.findById(receiverId).select('pushToken isOnline');
       
+      console.log(`📊 Receiver ${receiverId} - pushToken: ${receiver?.pushToken ? 'EXISTS' : 'NULL'}, isOnline: ${receiver?.isOnline}`);
+      
       // Send to receiver if online with database ID
       const receiverSocketId = connectedUsers.get(receiverId);
       if (receiverSocketId) {
