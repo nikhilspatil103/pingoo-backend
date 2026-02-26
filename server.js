@@ -842,14 +842,21 @@ io.on('connection', (socket) => {
       }
       
       // Send push notification if receiver is offline or not in chat
-      if (receiver?.pushToken && !receiverSocketId) {
-        const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
-        await sendPushNotification(
-          receiver.pushToken,
-          sender?.name || 'Someone',
-          notificationBody,
-          { type: 'message', senderId, senderName: sender?.name }
-        );
+      if (receiver?.pushToken) {
+        if (!receiverSocketId) {
+          console.log(`📤 Sending push notification to ${receiverId} (offline)`);
+          const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
+          await sendPushNotification(
+            receiver.pushToken,
+            sender?.name || 'Someone',
+            notificationBody,
+            { type: 'message', senderId, senderName: sender?.name }
+          );
+        } else {
+          console.log(`ℹ️ Not sending push notification to ${receiverId} (online via socket)`);
+        }
+      } else {
+        console.log(`⚠️ No push token for user ${receiverId}`);
       }
       
       // Send back to sender with database ID
@@ -1010,12 +1017,15 @@ app.post('/api/like/:userId', authMiddleware, async (req, res) => {
       // Send push notification for new like
       if (user.pushToken) {
         const liker = await User.findById(currentUserId).select('name');
+        console.log(`📤 Sending like notification to ${userId}`);
         await sendPushNotification(
           user.pushToken,
           'New Like! 💖',
           `${liker?.name || 'Someone'} liked your profile`,
           { type: 'like', likerId: currentUserId, likerName: liker?.name }
         );
+      } else {
+        console.log(`⚠️ No push token for user ${userId}`);
       }
     }
     
