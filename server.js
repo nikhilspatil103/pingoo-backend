@@ -154,6 +154,13 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  next();
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
@@ -279,23 +286,19 @@ app.post('/api/login', async (req, res) => {
 // Auth middleware
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  console.log('Auth header:', authHeader);
-  
   const token = authHeader?.replace('Bearer ', '');
-  console.log('Extracted token:', token);
   
   if (!token) {
-    console.log('No token provided');
+    console.log(`❌ No token provided for ${req.method} ${req.path}`);
     return res.status(401).json({ error: 'No token provided' });
   }
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('Decoded token:', decoded);
     req.user = decoded;
     next();
   } catch (error) {
-    console.log('Token verification error:', error.message);
+    console.log(`❌ Invalid token for ${req.method} ${req.path}:`, error.message);
     res.status(401).json({ error: 'Invalid token' });
   }
 };
@@ -348,11 +351,16 @@ app.post('/api/register-push-token', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Push token is required' });
     }
     
+    console.log(`🔔 Registering push token for user ${userId}`);
+    console.log(`Token: ${pushToken.substring(0, 30)}...`);
+    
     await User.findByIdAndUpdate(userId, { pushToken });
+    
+    console.log(`✅ Push token saved successfully for user ${userId}`);
     
     res.status(200).json({ message: 'Push token registered successfully' });
   } catch (error) {
-    console.error('Error registering push token:', error);
+    console.error('❌ Error registering push token:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
