@@ -306,7 +306,7 @@ const authMiddleware = (req, res, next) => {
 // Send push notification helper
 const sendPushNotification = async (pushToken, title, body, data = {}) => {
   if (!Expo.isExpoPushToken(pushToken)) {
-    console.error(`Push token ${pushToken} is not a valid Expo push token`);
+    console.error(`❌ Push token ${pushToken} is not a valid Expo push token`);
     return;
   }
 
@@ -316,13 +316,23 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
     title,
     body,
     data,
+    priority: 'high',
+    channelId: 'default',
   };
 
   try {
-    const ticket = await expo.sendPushNotificationsAsync([message]);
-    console.log('Notification sent:', ticket);
+    console.log(`📨 Sending notification:`, { title, body, to: pushToken.substring(0, 30) + '...' });
+    const tickets = await expo.sendPushNotificationsAsync([message]);
+    console.log('✅ Notification ticket:', JSON.stringify(tickets, null, 2));
+    
+    // Check for errors in tickets
+    tickets.forEach(ticket => {
+      if (ticket.status === 'error') {
+        console.error('❌ Notification error:', ticket.message, ticket.details);
+      }
+    });
   } catch (error) {
-    console.error('Error sending notification:', error);
+    console.error('❌ Error sending notification:', error.message, error.stack);
   }
 };
 
