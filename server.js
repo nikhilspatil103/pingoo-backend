@@ -13,6 +13,9 @@ const multer = require('multer');
 const redis = require('redis');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const { Expo } = require('expo-server-sdk');
+
+const expo = new Expo();
 
 // Cloudinary config
 cloudinary.config({
@@ -297,6 +300,29 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+// Send push notification helper
+const sendPushNotification = async (pushToken, title, body, data = {}) => {
+  if (!Expo.isExpoPushToken(pushToken)) {
+    console.error(`Push token ${pushToken} is not a valid Expo push token`);
+    return;
+  }
+
+  const message = {
+    to: pushToken,
+    sound: 'default',
+    title,
+    body,
+    data,
+  };
+
+  try {
+    const ticket = await expo.sendPushNotificationsAsync([message]);
+    console.log('Notification sent:', ticket);
+  } catch (error) {
+    console.error('Error sending notification:', error);
+  }
+};
+
 // Logout API
 app.post('/api/logout', authMiddleware, async (req, res) => {
   try {
@@ -308,6 +334,25 @@ app.post('/api/logout', authMiddleware, async (req, res) => {
     
     res.status(200).json({ message: 'Logout successful' });
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Register push token API
+app.post('/api/register-push-token', authMiddleware, async (req, res) => {
+  try {
+    const { pushToken } = req.body;
+    const userId = req.user.userId;
+    
+    if (!pushToken) {
+      return res.status(400).json({ error: 'Push token is required' });
+    }
+    
+    await User.findByIdAndUpdate(userId, { pushToken });
+    
+    res.status(200).json({ message: 'Push token registered successfully' });
+  } catch (error) {
+    console.error('Error registering push token:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -779,6 +824,10 @@ io.on('connection', (socket) => {
       });
       await newMessage.save();
       
+      // Get sender and receiver info
+      const sender = await User.findById(senderId).select('name');
+      const receiver = await User.findById(receiverId).select('pushToken isOnline');
+      
       // Send to receiver if online with database ID
       const receiverSocketId = connectedUsers.get(receiverId);
       if (receiverSocketId) {
@@ -790,6 +839,17 @@ io.on('connection', (socket) => {
           mediaType: mediaType || 'text',
           timestamp: newMessage.timestamp
         });
+      }
+      
+      // Send push notification if receiver is offline or not in chat
+      if (receiver?.pushToken && !receiverSocketId) {
+        const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
+        await sendPushNotification(
+          receiver.pushToken,
+          sender?.name || 'Someone',
+          notificationBody,
+          { type: 'message', senderId, senderName: sender?.name }
+        );
       }
       
       // Send back to sender with database ID
@@ -929,7 +989,7 @@ app.post('/api/like/:userId', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Cannot like yourself' });
     }
     
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('likes pushToken newLikes');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -939,8 +999,24 @@ app.post('/api/like/:userId', authMiddleware, async (req, res) => {
     
     if (isLiked) {
       user.likes = likes.filter(id => id.toString() !== currentUserId);
+      user.newLikes = (user.newLikes || []).filter(l => l.userId.toString() !== currentUserId);
     } else {
       user.likes = [...likes, currentUserId];
+      
+      // Add to newLikes
+      if (!user.newLikes) user.newLikes = [];
+      user.newLikes.push({ userId: currentUserId, timestamp: new Date(), read: false });
+      
+      // Send push notification for new like
+      if (user.pushToken) {
+        const liker = await User.findById(currentUserId).select('name');
+        await sendPushNotification(
+          user.pushToken,
+          'New Like! 💖',
+          `${liker?.name || 'Someone'} liked your profile`,
+          { type: 'like', likerId: currentUserId, likerName: liker?.name }
+        );
+      }
     }
     
     await user.save();
@@ -980,6 +1056,83 @@ app.get('/api/like-status/:userId', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting like status:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get new likes API
+app.get('/api/new-likes', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const user = await User.findById(userId)
+      .populate('newLikes.userId', 'name age profilePhoto')
+      .select('newLikes');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const likes = (user.newLikes || [])
+      .filter(l => !l.read)
+      .map(l => ({
+        id: l.userId._id,
+        name: l.userId.name,
+        age: l.userId.age,
+        profilePhoto: l.userId.profilePhoto,
+        timestamp: l.timestamp
+      }));
+    
+    res.status(200).json({ likes });
+  } catch (error) {
+    console.error('Error fetching new likes:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all likes API
+app.get('/api/all-likes', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const user = await User.findById(userId)
+      .populate('newLikes.userId', 'name age profilePhoto')
+      .select('newLikes');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const likes = (user.newLikes || [])
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .map(l => ({
+        id: l.userId._id,
+        name: l.userId.name,
+        age: l.userId.age,
+        profilePhoto: l.userId.profilePhoto,
+        timestamp: l.timestamp,
+        read: l.read
+      }));
+    
+    res.status(200).json({ likes });
+  } catch (error) {
+    console.error('Error fetching all likes:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Mark likes as read API
+app.post('/api/mark-likes-read', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    await User.findByIdAndUpdate(userId, {
+      $set: { 'newLikes.$[].read': true }
+    });
+    
+    res.status(200).json({ message: 'Likes marked as read' });
+  } catch (error) {
+    console.error('Error marking likes as read:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

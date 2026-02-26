@@ -43,6 +43,12 @@ const userSchema = new mongoose.Schema({
     expiresAt: { type: Date }
   }],
   lastSpinDate: { type: Date },
+  pushToken: { type: String },
+  newLikes: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    timestamp: { type: Date, default: Date.now },
+    read: { type: Boolean, default: false }
+  }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
