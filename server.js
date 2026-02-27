@@ -417,7 +417,7 @@ app.get('/api/users', authMiddleware, async (req, res) => {
         ...genderFilter
       }
     )
-    .select('name age gender profilePhoto location lookingFor isOnline lastSeen likes')
+    .select('name age gender profilePhoto location latitude longitude lookingFor isOnline lastSeen likes')
     .sort({ isOnline: -1, lastSeen: -1 })
     .skip(skip)
     .limit(limit)
@@ -431,6 +431,8 @@ app.get('/api/users', authMiddleware, async (req, res) => {
       gender: user.gender,
       profilePhoto: user.profilePhoto,
       location: user.location,
+      latitude: user.latitude,
+      longitude: user.longitude,
       lookingFor: user.lookingFor,
       isOnline: user.isOnline,
       lastSeen: user.lastSeen,
@@ -541,6 +543,8 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
       profilePhoto: user.profilePhoto,
       additionalPhotos: user.additionalPhotos || [],
       location: user.location,
+      latitude: user.latitude,
+      longitude: user.longitude,
       interests: user.interests || [],
       bio: user.bio,
       height: user.height,
@@ -776,6 +780,8 @@ app.get('/api/user/:userId', authMiddleware, async (req, res) => {
         profilePhoto: user.profilePhoto,
         additionalPhotos: user.additionalPhotos || [],
         location: user.location,
+        latitude: user.latitude,
+        longitude: user.longitude,
         interests: user.interests || [],
         bio: user.bio,
         height: user.height,
