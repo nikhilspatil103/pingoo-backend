@@ -867,20 +867,16 @@ io.on('connection', (socket) => {
         });
       }
       
-      // Send push notification if receiver is offline or not in chat
+      // Always send push notification for dating app
       if (receiver?.pushToken) {
-        if (!receiverSocketId) {
-          console.log(`📤 Sending push notification to ${receiverId} (offline)`);
-          const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
-          await sendPushNotification(
-            receiver.pushToken,
-            sender?.name || 'Someone',
-            notificationBody,
-            { type: 'message', senderId, senderName: sender?.name }
-          );
-        } else {
-          console.log(`ℹ️ Not sending push notification to ${receiverId} (online via socket)`);
-        }
+        console.log(`📤 Sending push notification to ${receiverId}`);
+        const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
+        await sendPushNotification(
+          receiver.pushToken,
+          sender?.name || 'Someone',
+          notificationBody,
+          { type: 'message', senderId, senderName: sender?.name }
+        );
       } else {
         console.log(`⚠️ No push token for user ${receiverId}`);
       }
