@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const validator = require('validator');
+const rateLimit = require('express-rate-limit');
 const User = require('./models/User');
 const Message = require('./models/Message');
 const cloudinary = require('cloudinary').v2;
@@ -153,6 +154,38 @@ app.use(cors({
 }));
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+
+// Rate limiting
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 login attempts per windowMs
+  message: { error: 'Too many login attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // limit each IP to 10 uploads per minute
+  message: { error: 'Too many upload requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Apply rate limiting
+app.use('/api/', generalLimiter);
+app.use('/api/login', authLimiter);
+app.use('/api/signup', authLimiter);
+app.use('/api/upload-image-base64', uploadLimiter);
+app.use('/api/upload-image-public', uploadLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {
