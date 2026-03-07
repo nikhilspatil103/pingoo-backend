@@ -1001,23 +1001,6 @@ io.on('connection', (socket) => {
     }
   });
 
-
-  socket.on('markMessageSeen', async (data) => {
-    const { messageId, senderId } = data;
-    
-    try {
-      await Message.findByIdAndUpdate(messageId, { isRead: true });
-      
-      // Notify sender that message was seen
-      const senderSocketId = connectedUsers.get(senderId);
-      if (senderSocketId) {
-        io.to(senderSocketId).emit('messageSeen', { messageId });
-      }
-    } catch (error) {
-      console.error('Error marking message as seen:', error);
-    }
-  });
-
   socket.on('disconnect', async () => {
     if (socket.userId) {
       connectedUsers.delete(socket.userId);
