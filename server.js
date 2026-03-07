@@ -1238,6 +1238,7 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
       mediaUrl: msg.isRecalled ? null : (msg.mediaUrl || null),
       mediaType: msg.isRecalled ? 'text' : (msg.mediaType || 'text'),
       isRecalled: msg.isRecalled || false,
+      isRead: msg.isRead || false,
       sent: msg.senderId.toString() === currentUserId,
       time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: msg.timestamp
