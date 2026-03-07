@@ -34,6 +34,10 @@ const messageSchema = new mongoose.Schema({
   isRecalled: {
     type: Boolean,
     default: false
+  },
+  replyTo: {
+    messageId: String,
+    text: String
   }
 });
 

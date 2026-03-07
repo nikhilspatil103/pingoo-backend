@@ -867,7 +867,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('sendMessage', async (data) => {
-    const { receiverId, message, senderId, mediaUrl, mediaType } = data;
+    const { receiverId, message, senderId, mediaUrl, mediaType, replyTo } = data;
     
     try {
       // Save message to database
@@ -877,6 +877,7 @@ io.on('connection', (socket) => {
         message: message || '',
         mediaUrl: mediaUrl || null,
         mediaType: mediaType || 'text',
+        replyTo: replyTo || null,
         timestamp: new Date()
       });
       await newMessage.save();
@@ -896,6 +897,7 @@ io.on('connection', (socket) => {
           message: message || '',
           mediaUrl: mediaUrl || null,
           mediaType: mediaType || 'text',
+          replyTo: replyTo || null,
           timestamp: newMessage.timestamp
         });
       }
@@ -1239,6 +1241,7 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
       mediaType: msg.isRecalled ? 'text' : (msg.mediaType || 'text'),
       isRecalled: msg.isRecalled || false,
       isRead: msg.isRead || false,
+      replyTo: msg.replyTo || null,
       sent: msg.senderId.toString() === currentUserId,
       time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: msg.timestamp
