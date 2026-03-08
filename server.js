@@ -680,6 +680,31 @@ app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
   }
 });
 
+// Upload audio endpoint (base64)
+app.post('/api/upload-audio-base64', authMiddleware, async (req, res) => {
+  try {
+    const { audio } = req.body;
+    
+    if (!audio) {
+      return res.status(400).json({ error: 'No audio data provided' });
+    }
+    
+    const result = await cloudinary.uploader.upload(audio, {
+      folder: 'pingoo-audio',
+      public_id: `audio_${Date.now()}`,
+      resource_type: 'video'
+    });
+
+    res.status(200).json({ 
+      message: 'Audio uploaded successfully',
+      audioUrl: result.secure_url 
+    });
+  } catch (error) {
+    console.error('Error uploading audio:', error);
+    res.status(500).json({ error: 'Failed to upload audio', details: error.message });
+  }
+});
+
 // Delete photo API
 app.delete('/api/delete-photo', authMiddleware, async (req, res) => {
   try {
@@ -867,7 +892,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('sendMessage', async (data) => {
-    const { receiverId, message, senderId, mediaUrl, mediaType, replyTo } = data;
+    const { receiverId, message, senderId, mediaUrl, mediaType, tempId, replyTo } = data;
     
     try {
       // Save message to database
@@ -905,7 +930,15 @@ io.on('connection', (socket) => {
       // Always send push notification for dating app
       if (receiver?.pushToken) {
         console.log(`📤 Sending push notification to ${receiverId}`);
-        const notificationBody = mediaType === 'image' ? '📷 Sent a photo' : message;
+        let notificationBody;
+        if (mediaType === 'image') {
+          notificationBody = '📷 Sent a photo';
+        } else if (mediaType === 'audio') {
+          notificationBody = '🎵 Sent an audio message';
+        } else {
+          notificationBody = message;
+        }
+        
         await sendPushNotification(
           receiver.pushToken,
           sender?.name || 'Someone',
@@ -920,7 +953,7 @@ io.on('connection', (socket) => {
       const senderSocketId = connectedUsers.get(senderId);
       if (senderSocketId) {
         socket.emit('messageSaved', {
-          tempId: data.tempId,
+          tempId: tempId,
           messageId: newMessage._id,
           timestamp: newMessage.timestamp
         });
@@ -1239,6 +1272,8 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
       text: msg.isRecalled ? (msg.senderId.toString() === currentUserId ? 'You recalled this message' : 'This message was recalled') : (msg.message || ''),
       mediaUrl: msg.isRecalled ? null : (msg.mediaUrl || null),
       mediaType: msg.isRecalled ? 'text' : (msg.mediaType || 'text'),
+      audioDuration: msg.audioDuration || null,
+      replyTo: msg.replyTo || null,
       isRecalled: msg.isRecalled || false,
       isRead: msg.isRead || false,
       replyTo: msg.replyTo || null,

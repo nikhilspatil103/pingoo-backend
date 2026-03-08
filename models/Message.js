@@ -20,8 +20,18 @@ const messageSchema = new mongoose.Schema({
   },
   mediaType: {
     type: String,
-    enum: ['image', 'video', 'text'],
+    enum: ['image', 'video', 'audio', 'text'],
     default: 'text'
+  },
+  audioDuration: {
+    type: Number
+  },
+  replyTo: {
+    messageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message'
+    },
+    text: String
   },
   timestamp: {
     type: Date,
