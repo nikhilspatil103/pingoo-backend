@@ -16,6 +16,9 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const { Expo } = require('expo-server-sdk');
 
+// Import payment routes
+const paymentRoutes = require('./routes/payment');
+
 const expo = new Expo();
 
 // Cloudinary config
@@ -186,6 +189,9 @@ app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/upload-image-base64', uploadLimiter);
 app.use('/api/upload-image-public', uploadLimiter);
+
+// Use payment routes
+app.use('/api/payment', paymentRoutes);
 
 // Request logging middleware
 app.use((req, res, next) => {
