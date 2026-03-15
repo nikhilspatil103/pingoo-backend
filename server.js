@@ -254,7 +254,7 @@ app.post('/api/signup', async (req, res) => {
     await user.save();
 
     // Generate token for auto-login after signup
-    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
     
     // Set user as online
     await User.findByIdAndUpdate(user._id, { 
@@ -309,7 +309,7 @@ app.post('/api/login', async (req, res) => {
       lastSeen: new Date() 
     });
 
-    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
     res.status(200).json({ token, userId: user._id, name: user.name, email: user.email });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
