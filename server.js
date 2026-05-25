@@ -1666,7 +1666,7 @@ app.get('/api/moods', authMiddleware, async (req, res) => {
 
     const moods = await Mood.find({
       isActive: true,
-      userId: { $nin: blockedUsers }
+      userId: { $nin: [...blockedUsers, currentUserId] }
     })
     .sort({ createdAt: -1 })
     .skip(skip)
