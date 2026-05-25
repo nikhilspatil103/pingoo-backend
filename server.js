@@ -9,6 +9,7 @@ const validator = require('validator');
 const rateLimit = require('express-rate-limit');
 const User = require('./models/User');
 const Message = require('./models/Message');
+const Mood = require('./models/Mood');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const redis = require('redis');
@@ -1469,6 +1470,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
             ]
           },
           lastMessage: { $first: '$message' },
+          lastMessageType: { $first: '$messageType' },
           lastMessageTime: { $first: '$timestamp' },
           isFromMe: { $first: { $eq: ['$senderId', new mongoose.Types.ObjectId(userId)] } },
           unreadCount: {
@@ -1505,6 +1507,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
           age: '$user.age',
           profilePhoto: '$user.profilePhoto',
           lastMessage: 1,
+          lastMessageType: 1,
           lastMessageTime: 1,
           isFromMe: 1,
           unreadCount: 1
@@ -1614,6 +1617,215 @@ app.get('/api/blocked-by/:userId', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// ==================== MOOD REELS APIs ====================
+
+// Upload mood video
+app.post('/api/mood', authMiddleware, async (req, res) => {
+  try {
+    const { video, caption, mood } = req.body;
+    const userId = req.user.userId;
+
+    if (!video) return res.status(400).json({ error: 'Video is required' });
+
+    // Upload video to Cloudinary
+    const result = await cloudinary.uploader.upload(video, {
+      folder: 'pingoo-moods',
+      resource_type: 'video',
+      transformation: [{ quality: 'auto', duration: 30 }] // max 30 sec
+    });
+
+    const newMood = new Mood({
+      userId,
+      videoUrl: result.secure_url,
+      caption: caption || '',
+      mood: mood || 'vibing'
+    });
+    await newMood.save();
+
+    res.status(201).json({ message: 'Mood posted!', mood: newMood });
+  } catch (error) {
+    console.error('Error posting mood:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get mood feed (reels style)
+app.get('/api/moods', authMiddleware, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+    const currentUserId = req.user.userId;
+
+    // Get blocked users
+    const currentUser = await User.findById(currentUserId).select('blockedUsers');
+    const blockedUsers = currentUser?.blockedUsers || [];
+
+    const moods = await Mood.find({
+      isActive: true,
+      userId: { $nin: blockedUsers }
+    })
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .populate('userId', 'name age profilePhoto gender isOnline')
+    .populate('comments.userId', 'name profilePhoto')
+    .lean();
+
+    const transformed = moods.map(m => ({
+      id: m._id,
+      user: {
+        id: m.userId._id,
+        name: m.userId.name,
+        age: m.userId.age,
+        profilePhoto: m.userId.profilePhoto,
+        gender: m.userId.gender,
+        isOnline: m.userId.isOnline
+      },
+      videoUrl: m.videoUrl,
+      caption: m.caption,
+      mood: m.mood,
+      likesCount: m.likes.length,
+      isLiked: m.likes.some(id => id.toString() === currentUserId),
+      comments: m.comments.slice(-20).map(c => ({
+        id: c._id,
+        user: { id: c.userId._id, name: c.userId.name, profilePhoto: c.userId.profilePhoto },
+        text: c.text,
+        createdAt: c.createdAt
+      })),
+      commentsCount: m.comments.length,
+      views: m.views,
+      createdAt: m.createdAt
+    }));
+
+    res.status(200).json({ moods: transformed, page });
+  } catch (error) {
+    console.error('Error fetching moods:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Like/unlike a mood
+app.post('/api/mood/:moodId/like', authMiddleware, async (req, res) => {
+  try {
+    const { moodId } = req.params;
+    const userId = req.user.userId;
+
+    const mood = await Mood.findById(moodId);
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+
+    const isLiked = mood.likes.some(id => id.toString() === userId);
+    if (isLiked) {
+      mood.likes = mood.likes.filter(id => id.toString() !== userId);
+    } else {
+      mood.likes.push(userId);
+    }
+    await mood.save();
+
+    res.status(200).json({ isLiked: !isLiked, likesCount: mood.likes.length });
+  } catch (error) {
+    console.error('Error liking mood:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Comment on a mood
+app.post('/api/mood/:moodId/comment', authMiddleware, async (req, res) => {
+  try {
+    const { moodId } = req.params;
+    const { text } = req.body;
+    const userId = req.user.userId;
+
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Comment text required' });
+
+    const mood = await Mood.findById(moodId);
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+
+    mood.comments.push({ userId, text: text.trim() });
+    await mood.save();
+
+    const user = await User.findById(userId).select('name profilePhoto');
+
+    res.status(201).json({
+      comment: {
+        id: mood.comments[mood.comments.length - 1]._id,
+        user: { id: userId, name: user.name, profilePhoto: user.profilePhoto },
+        text: text.trim(),
+        createdAt: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('Error commenting:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Increment mood view count
+app.post('/api/mood/:moodId/view', authMiddleware, async (req, res) => {
+  try {
+    await Mood.findByIdAndUpdate(req.params.moodId, { $inc: { views: 1 } });
+    res.status(200).json({ message: 'View counted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete own mood
+app.delete('/api/mood/:moodId', authMiddleware, async (req, res) => {
+  try {
+    const mood = await Mood.findOne({ _id: req.params.moodId, userId: req.user.userId });
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+    await Mood.findByIdAndDelete(req.params.moodId);
+    res.status(200).json({ message: 'Mood deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Purchase chat from mood (30 coins, 6hr access)
+app.post('/api/mood-chat/:userId', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const { userId } = req.params;
+    const MOOD_CHAT_COST = 30;
+    const CHAT_DURATION_HOURS = 6;
+
+    if (currentUserId === userId) return res.status(400).json({ error: 'Cannot chat with yourself' });
+
+    const user = await User.findById(currentUserId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Check if already has active access
+    const existingAccess = user.chatAccess?.find(a => a.userId.toString() === userId);
+    if (existingAccess && new Date(existingAccess.expiresAt) > new Date()) {
+      return res.status(200).json({ message: 'Already have access', coins: user.coins, expiresAt: existingAccess.expiresAt });
+    }
+
+    if (user.coins < MOOD_CHAT_COST) {
+      return res.status(400).json({ error: 'Insufficient coins', required: MOOD_CHAT_COST, current: user.coins });
+    }
+
+    user.coins -= MOOD_CHAT_COST;
+    const expiresAt = new Date(Date.now() + CHAT_DURATION_HOURS * 60 * 60 * 1000);
+
+    const idx = user.chatAccess?.findIndex(a => a.userId.toString() === userId);
+    if (idx !== undefined && idx !== -1) {
+      user.chatAccess[idx].expiresAt = expiresAt;
+    } else {
+      if (!user.chatAccess) user.chatAccess = [];
+      user.chatAccess.push({ userId, expiresAt });
+    }
+
+    await user.save();
+    res.status(200).json({ message: 'Chat access purchased via mood', coins: user.coins, expiresAt });
+  } catch (error) {
+    console.error('Error purchasing mood chat:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ==================== END MOOD REELS APIs ====================
 
 // Report user API
 app.post('/api/report/:userId', authMiddleware, async (req, res) => {
