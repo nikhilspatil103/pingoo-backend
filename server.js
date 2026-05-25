@@ -373,10 +373,10 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
 // Logout API
 app.post('/api/logout', authMiddleware, async (req, res) => {
   try {
-    // Update user offline status
     await User.findByIdAndUpdate(req.user.userId, { 
       isOnline: false, 
-      lastSeen: new Date() 
+      lastSeen: new Date(),
+      pushToken: null
     });
     
     res.status(200).json({ message: 'Logout successful' });
