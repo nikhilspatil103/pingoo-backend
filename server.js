@@ -1229,7 +1229,9 @@ app.get('/api/all-likes', authMiddleware, async (req, res) => {
         age: l.userId.age,
         profilePhoto: l.userId.profilePhoto,
         timestamp: l.timestamp,
-        read: l.read
+        read: l.read,
+        type: l.type || 'profile_like',
+        moodId: l.moodId || null
       }));
     
     res.status(200).json({ likes });
@@ -1720,6 +1722,26 @@ app.post('/api/mood/:moodId/like', authMiddleware, async (req, res) => {
       mood.likes = mood.likes.filter(id => id.toString() !== userId);
     } else {
       mood.likes.push(userId);
+
+      // Send push notification to mood owner
+      if (mood.userId.toString() !== userId) {
+        const moodOwner = await User.findById(mood.userId).select('pushToken newLikes');
+        const liker = await User.findById(userId).select('name profilePhoto');
+
+        if (moodOwner?.pushToken) {
+          await sendPushNotification(
+            moodOwner.pushToken,
+            '❤️ Mood Liked!',
+            `${liker?.name || 'Someone'} liked your mood`,
+            { type: 'mood_like', moodId, likerId: userId, likerName: liker?.name }
+          );
+        }
+
+        // Add to newLikes for notification center
+        if (!moodOwner.newLikes) moodOwner.newLikes = [];
+        moodOwner.newLikes.push({ userId, timestamp: new Date(), read: false, type: 'mood_like', moodId });
+        await moodOwner.save();
+      }
     }
     await mood.save();
 
@@ -1746,6 +1768,25 @@ app.post('/api/mood/:moodId/comment', authMiddleware, async (req, res) => {
     await mood.save();
 
     const user = await User.findById(userId).select('name profilePhoto');
+
+    // Send push notification to mood owner
+    if (mood.userId.toString() !== userId) {
+      const moodOwner = await User.findById(mood.userId).select('pushToken newLikes');
+
+      if (moodOwner?.pushToken) {
+        await sendPushNotification(
+          moodOwner.pushToken,
+          '💬 New Comment!',
+          `${user?.name || 'Someone'} commented: "${text.trim().substring(0, 50)}"`,
+          { type: 'mood_comment', moodId, commenterId: userId, commenterName: user?.name }
+        );
+      }
+
+      // Add to newLikes for notification center
+      if (!moodOwner.newLikes) moodOwner.newLikes = [];
+      moodOwner.newLikes.push({ userId, timestamp: new Date(), read: false, type: 'mood_comment', moodId });
+      await moodOwner.save();
+    }
 
     res.status(201).json({
       comment: {

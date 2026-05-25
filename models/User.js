@@ -47,7 +47,9 @@ const userSchema = new mongoose.Schema({
   newLikes: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     timestamp: { type: Date, default: Date.now },
-    read: { type: Boolean, default: false }
+    read: { type: Boolean, default: false },
+    type: { type: String, enum: ['profile_like', 'mood_like', 'mood_comment'], default: 'profile_like' },
+    moodId: { type: mongoose.Schema.Types.ObjectId, ref: 'Mood' }
   }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
