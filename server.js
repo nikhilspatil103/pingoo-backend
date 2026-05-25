@@ -1835,6 +1835,44 @@ app.delete('/api/mood/:moodId', authMiddleware, async (req, res) => {
   }
 });
 
+// Get my moods
+app.get('/api/my-moods', authMiddleware, async (req, res) => {
+  try {
+    const moods = await Mood.find({ userId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const transformed = moods.map(m => ({
+      id: m._id,
+      videoUrl: m.videoUrl,
+      caption: m.caption,
+      mood: m.mood,
+      likesCount: m.likes.length,
+      commentsCount: m.comments.length,
+      views: m.views || 0,
+      isActive: m.isActive,
+      createdAt: m.createdAt
+    }));
+
+    res.status(200).json({ moods: transformed });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Toggle mood visibility (hide/show)
+app.patch('/api/mood/:moodId/toggle', authMiddleware, async (req, res) => {
+  try {
+    const mood = await Mood.findOne({ _id: req.params.moodId, userId: req.user.userId });
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+    mood.isActive = !mood.isActive;
+    await mood.save();
+    res.status(200).json({ message: mood.isActive ? 'Mood visible' : 'Mood hidden', isActive: mood.isActive });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Purchase chat from mood (30 coins, 6hr access)
 app.post('/api/mood-chat/:userId', authMiddleware, async (req, res) => {
   try {
