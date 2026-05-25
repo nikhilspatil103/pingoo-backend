@@ -1634,7 +1634,7 @@ app.post('/api/mood', authMiddleware, async (req, res) => {
     const result = await cloudinary.uploader.upload(video, {
       folder: 'pingoo-moods',
       resource_type: 'video',
-      transformation: [{ quality: 'auto', duration: 30 }] // max 30 sec
+      transformation: [{ quality: 'auto', duration: 15 }] // max 15 sec
     });
 
     const newMood = new Mood({
