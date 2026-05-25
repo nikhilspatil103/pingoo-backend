@@ -12,6 +12,7 @@ const moodSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
   }],
   views: { type: Number, default: 0 },
+  viewedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isActive: { type: Boolean, default: true },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) }, // 24hr expiry
   createdAt: { type: Date, default: Date.now }

@@ -1802,11 +1802,22 @@ app.post('/api/mood/:moodId/comment', authMiddleware, async (req, res) => {
   }
 });
 
-// Increment mood view count
+// Increment mood view count (unique per user)
 app.post('/api/mood/:moodId/view', authMiddleware, async (req, res) => {
   try {
-    await Mood.findByIdAndUpdate(req.params.moodId, { $inc: { views: 1 } });
-    res.status(200).json({ message: 'View counted' });
+    const userId = req.user.userId;
+    const mood = await Mood.findById(req.params.moodId);
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+
+    // Skip if user already viewed or is the owner
+    if (mood.userId.toString() === userId || mood.viewedBy.includes(userId)) {
+      return res.status(200).json({ message: 'Already viewed', views: mood.views });
+    }
+
+    mood.viewedBy.push(userId);
+    mood.views = mood.viewedBy.length;
+    await mood.save();
+    res.status(200).json({ message: 'View counted', views: mood.views });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
