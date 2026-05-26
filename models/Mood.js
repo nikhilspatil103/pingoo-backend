@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const moodSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   videoUrl: { type: String, required: true },
+  thumbnailUrl: { type: String },
   caption: { type: String, maxlength: 150 },
   mood: { type: String }, // happy, sad, excited, chill, etc.
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

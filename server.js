@@ -1625,7 +1625,7 @@ app.get('/api/blocked-by/:userId', authMiddleware, async (req, res) => {
 // Upload mood video
 app.post('/api/mood', authMiddleware, async (req, res) => {
   try {
-    const { video, caption, mood } = req.body;
+    const { video, thumbnail, caption, mood } = req.body;
     const userId = req.user.userId;
 
     if (!video) return res.status(400).json({ error: 'Video is required' });
@@ -1637,9 +1637,20 @@ app.post('/api/mood', authMiddleware, async (req, res) => {
       transformation: [{ quality: 'auto', duration: 15 }] // max 15 sec
     });
 
+    // Upload thumbnail if provided
+    let thumbnailUrl = null;
+    if (thumbnail) {
+      const thumbResult = await cloudinary.uploader.upload(thumbnail, {
+        folder: 'pingoo-moods-thumbnails',
+        transformation: [{ width: 400, height: 700, crop: 'fill' }, { quality: 'auto' }]
+      });
+      thumbnailUrl = thumbResult.secure_url;
+    }
+
     const newMood = new Mood({
       userId,
       videoUrl: result.secure_url,
+      thumbnailUrl,
       caption: caption || '',
       mood: mood || 'vibing'
     });
@@ -1686,6 +1697,7 @@ app.get('/api/moods', authMiddleware, async (req, res) => {
         isOnline: m.userId.isOnline
       },
       videoUrl: m.videoUrl,
+      thumbnailUrl: m.thumbnailUrl || null,
       caption: m.caption,
       mood: m.mood,
       likesCount: m.likes.length,
@@ -1845,6 +1857,7 @@ app.get('/api/my-moods', authMiddleware, async (req, res) => {
     const transformed = moods.map(m => ({
       id: m._id,
       videoUrl: m.videoUrl,
+      thumbnailUrl: m.thumbnailUrl || null,
       caption: m.caption,
       mood: m.mood,
       likesCount: m.likes.length,
