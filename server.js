@@ -304,6 +304,11 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Check if user is banned
+    if (user.isBanned) {
+      return res.status(403).json({ error: 'Your account has been banned for violating community guidelines. Contact support for appeal.' });
+    }
+
     // Update user online status
     await User.findByIdAndUpdate(user._id, { 
       isOnline: true, 
@@ -1929,6 +1934,67 @@ app.post('/api/mood-chat/:userId', authMiddleware, async (req, res) => {
 });
 
 // ==================== END MOOD REELS APIs ====================
+
+// Report mood API — auto-hide on 2 reports + strike system
+app.post('/api/mood/:moodId/report', authMiddleware, async (req, res) => {
+  try {
+    const { moodId } = req.params;
+    const { reason } = req.body;
+    const userId = req.user.userId;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Report reason is required' });
+    }
+
+    const mood = await Mood.findById(moodId);
+    if (!mood) return res.status(404).json({ error: 'Mood not found' });
+
+    // Check if already reported by this user
+    const alreadyReported = mood.reports?.some(r => r.userId.toString() === userId);
+    if (alreadyReported) {
+      return res.status(400).json({ error: 'You have already reported this mood' });
+    }
+
+    // Add report
+    mood.reports.push({ userId, reason: reason.trim() });
+
+    // Auto-hide if 2+ reports
+    if (mood.reports.length >= 2) {
+      mood.isActive = false;
+
+      // Add strike to mood owner
+      const moodOwner = await User.findById(mood.userId);
+      if (moodOwner) {
+        moodOwner.strikes = (moodOwner.strikes || 0) + 1;
+
+        // Ban on 3 strikes
+        if (moodOwner.strikes >= 3) {
+          moodOwner.isBanned = true;
+        }
+        await moodOwner.save();
+
+        // Send push notification warning
+        if (moodOwner.pushToken) {
+          const warningTitle = moodOwner.strikes >= 3 ? '\u26d4 Account Banned' : '\u26a0\ufe0f Content Warning';
+          const warningBody = moodOwner.strikes >= 3
+            ? 'Your account has been banned for violating community guidelines.'
+            : `Your mood was removed for violating guidelines. Strike ${moodOwner.strikes}/3.`;
+          await sendPushNotification(moodOwner.pushToken, warningTitle, warningBody, { type: 'strike' });
+        }
+      }
+    }
+
+    await mood.save();
+
+    res.status(200).json({
+      message: 'Mood reported successfully',
+      hidden: mood.reports.length >= 2
+    });
+  } catch (error) {
+    console.error('Error reporting mood:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Report user API
 app.post('/api/report/:userId', authMiddleware, async (req, res) => {

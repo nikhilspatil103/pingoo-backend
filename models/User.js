@@ -53,6 +53,8 @@ const userSchema = new mongoose.Schema({
   }],
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
+  strikes: { type: Number, default: 0 },
+  isBanned: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 

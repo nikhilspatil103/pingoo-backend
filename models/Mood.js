@@ -14,6 +14,11 @@ const moodSchema = new mongoose.Schema({
   }],
   views: { type: Number, default: 0 },
   viewedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  reports: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason: { type: String },
+    createdAt: { type: Date, default: Date.now }
+  }],
   isActive: { type: Boolean, default: true },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }, // 7 days expiry
   createdAt: { type: Date, default: Date.now }
