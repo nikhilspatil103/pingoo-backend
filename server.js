@@ -2033,6 +2033,25 @@ app.post('/api/report/:userId', authMiddleware, async (req, res) => {
   }
 });
 
+// Test payment endpoint - simulates coin purchase (replace with Google Play Billing in production)
+app.post('/api/payment/test-purchase', authMiddleware, async (req, res) => {
+  const { coins, packageId } = req.body;
+  
+  if (!coins || coins <= 0) {
+    return res.status(400).json({ error: 'Invalid coin amount' });
+  }
+  
+  try {
+    await User.findByIdAndUpdate(req.user.userId, { $inc: { coins: coins } });
+    const user = await User.findById(req.user.userId).select('coins');
+    
+    res.json({ success: true, coins: user.coins, purchased: coins });
+  } catch (error) {
+    console.error('Error processing test purchase:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`Pingoo backend running on port ${PORT}`);
 });
