@@ -37,6 +37,18 @@ const upload = multer({
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// Generate unique username from name
+const generateUsername = async (name) => {
+  const base = name.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  let username = base;
+  let exists = await User.findOne({ username });
+  while (exists) {
+    username = `${base}_${Math.floor(Math.random() * 9999)}`;
+    exists = await User.findOne({ username });
+  }
+  return username;
+};
+
 // Redis client setup (optional)
 let redisClient = null;
 let redisConnected = false;
@@ -242,8 +254,12 @@ app.post('/api/signup', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Generate unique username
+    const username = await generateUsername(sanitizedName);
+
     const user = new User({ 
       name: sanitizedName, 
+      username,
       email: sanitizedEmail, 
       password: hashedPassword, 
       age, 
@@ -575,6 +591,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
     const userProfile = {
       id: user._id,
       name: user.name,
+      username: user.username,
       email: user.email,
       age: user.age,
       gender: user.gender,
@@ -2059,6 +2076,106 @@ app.post('/api/payment/test-purchase', authMiddleware, async (req, res) => {
     res.json({ success: true, coins: user.coins, purchased: coins });
   } catch (error) {
     console.error('Error processing test purchase:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Search users by username
+app.get('/api/search', authMiddleware, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+    }
+
+    const query = q.trim().toLowerCase();
+    const users = await User.find({
+      $or: [
+        { username: { $regex: query, $options: 'i' } },
+        { name: { $regex: query, $options: 'i' } }
+      ],
+      _id: { $ne: req.user.userId }
+    })
+    .select('name username age gender profilePhoto isOnline')
+    .limit(20)
+    .lean();
+
+    const results = users.map(u => ({
+      id: u._id,
+      name: u.name,
+      username: u.username,
+      age: u.age,
+      gender: u.gender,
+      profilePhoto: u.profilePhoto,
+      isOnline: u.isOnline
+    }));
+
+    res.status(200).json({ users: results });
+  } catch (error) {
+    console.error('Error searching users:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update username
+app.put('/api/username', authMiddleware, async (req, res) => {
+  try {
+    const { username } = req.body;
+    const userId = req.user.userId;
+
+    if (!username || username.trim().length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+
+    const sanitized = username.toLowerCase().replace(/[^a-z0-9_]/g, '').trim();
+    
+    if (sanitized.length < 3 || sanitized.length > 20) {
+      return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscores)' });
+    }
+
+    const existing = await User.findOne({ username: sanitized, _id: { $ne: userId } });
+    if (existing) {
+      return res.status(400).json({ error: 'Username already taken' });
+    }
+
+    await User.findByIdAndUpdate(userId, { username: sanitized });
+    res.status(200).json({ message: 'Username updated', username: sanitized });
+  } catch (error) {
+    console.error('Error updating username:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Check username availability
+app.get('/api/username/check', authMiddleware, async (req, res) => {
+  try {
+    const { username } = req.query;
+    if (!username || username.length < 3) {
+      return res.status(400).json({ available: false, error: 'Too short' });
+    }
+
+    const sanitized = username.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const existing = await User.findOne({ username: sanitized, _id: { $ne: req.user.userId } });
+    
+    res.status(200).json({ available: !existing, username: sanitized });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Migration: Auto-assign usernames to existing users without one
+app.post('/api/migrate-usernames', authMiddleware, async (req, res) => {
+  try {
+    const users = await User.find({ $or: [{ username: null }, { username: '' }, { username: { $exists: false } }] });
+    let count = 0;
+    for (const user of users) {
+      const username = await generateUsername(user.name);
+      await User.findByIdAndUpdate(user._id, { username });
+      count++;
+    }
+    res.status(200).json({ message: `Migrated ${count} users` });
+  } catch (error) {
+    console.error('Error migrating usernames:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
