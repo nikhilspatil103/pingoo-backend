@@ -655,7 +655,7 @@ app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
   try {
     console.log('Base64 upload request received');
     
-    const { image, filename } = req.body;
+    const { image, filename, type } = req.body;
     
     if (!image) {
       console.log('No image data provided');
@@ -664,14 +664,25 @@ app.post('/api/upload-image-base64', authMiddleware, async (req, res) => {
     
     console.log('Uploading base64 image to Cloudinary');
     
-    const result = await cloudinary.uploader.upload(image, {
-      folder: 'pingoo-profiles',
-      public_id: `profile_${Date.now()}`,
-      transformation: [
+    // Use different settings for profile vs mood/chat images
+    const isProfile = type === 'profile';
+    const uploadOptions = {
+      folder: isProfile ? 'pingoo-profiles' : 'pingoo-media',
+      public_id: `${isProfile ? 'profile' : 'media'}_${Date.now()}`,
+    };
+    
+    if (isProfile) {
+      uploadOptions.transformation = [
         { width: 400, height: 400, crop: 'fill' },
         { quality: 'auto' }
-      ]
-    });
+      ];
+    } else {
+      uploadOptions.transformation = [
+        { quality: 'auto:best' }
+      ];
+    }
+    
+    const result = await cloudinary.uploader.upload(image, uploadOptions);
 
     // Cache Cloudinary URL for 24 hours
     await setCache(`cloudinary:${result.public_id}`, result.secure_url, CACHE_TTL.CLOUDINARY_URL);
