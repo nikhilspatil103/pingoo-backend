@@ -2163,8 +2163,8 @@ app.get('/api/username/check', authMiddleware, async (req, res) => {
   }
 });
 
-// Migration: Auto-assign usernames to existing users without one
-app.post('/api/migrate-usernames', authMiddleware, async (req, res) => {
+// Migration: Auto-assign usernames to existing users without one (no auth needed, one-time use)
+app.post('/api/migrate-usernames', async (req, res) => {
   try {
     const users = await User.find({ $or: [{ username: null }, { username: '' }, { username: { $exists: false } }] });
     let count = 0;
