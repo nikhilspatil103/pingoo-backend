@@ -482,6 +482,7 @@ app.get('/api/users', authMiddleware, async (req, res) => {
     const transformedUsers = users.map(user => ({
       id: user._id,
       name: user.name,
+      username: user.username,
       age: user.age,
       gender: user.gender,
       profilePhoto: user.profilePhoto,
@@ -866,6 +867,7 @@ app.get('/api/user/:userId', authMiddleware, async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
+        username: user.username,
         email: user.email,
         age: user.age,
         gender: user.gender,
