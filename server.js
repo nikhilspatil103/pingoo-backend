@@ -2182,6 +2182,53 @@ app.post('/api/migrate-usernames', async (req, res) => {
   }
 });
 
+// Cron job - backup DB to separate database every 24 hours
+const backupDB = async () => {
+  try {
+    const sourceDb = mongoose.connection.db;
+    const backupDbName = sourceDb.databaseName + '_backup';
+    const backupDb = mongoose.connection.client.db(backupDbName);
+    
+    const collections = await sourceDb.listCollections().toArray();
+    
+    for (const col of collections) {
+      const sourceCollection = sourceDb.collection(col.name);
+      const backupCollection = backupDb.collection(col.name);
+      
+      const data = await sourceCollection.find({}).toArray();
+      
+      if (data.length > 0) {
+        // Drop existing backup collection and re-insert fresh data
+        await backupCollection.deleteMany({});
+        await backupCollection.insertMany(data);
+      }
+    }
+    
+    console.log(`✅ DB backup completed at ${new Date().toISOString()} - ${collections.length} collections backed up to ${backupDbName}`);
+    return { success: true, dbName: backupDbName, collections: collections.length };
+  } catch (error) {
+    console.error('❌ DB backup failed:', error);
+    return null;
+  }
+};
+
+// Run backup every 24 hours
+setInterval(backupDB, 24 * 60 * 60 * 1000);
+
+// Manual backup API
+app.get('/api/backup-db', authMiddleware, async (req, res) => {
+  try {
+    const result = await backupDB();
+    if (result) {
+      res.status(200).json({ message: 'Backup completed', ...result });
+    } else {
+      res.status(500).json({ error: 'Backup failed' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`Pingoo backend running on port ${PORT}`);
 });
