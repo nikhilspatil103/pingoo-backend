@@ -197,6 +197,7 @@ const uploadLimiter = rateLimit({
 app.use('/api/', generalLimiter);
 app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
+app.use('/api/auth/google', authLimiter);
 app.use('/api/upload-image-base64', uploadLimiter);
 app.use('/api/upload-image-public', uploadLimiter);
 
@@ -334,6 +335,80 @@ app.post('/api/login', async (req, res) => {
     const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
     res.status(200).json({ token, userId: user._id, name: user.name, email: user.email });
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Google Auth API
+app.post('/api/auth/google', async (req, res) => {
+  const { accessToken } = req.body;
+
+  if (!accessToken) {
+    return res.status(400).json({ error: 'Access token is required' });
+  }
+
+  try {
+    // Fetch user info from Google
+    const googleRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!googleRes.ok) {
+      return res.status(401).json({ error: 'Invalid Google token' });
+    }
+
+    const googleUser = await googleRes.json();
+    const { id: googleId, email, name, picture } = googleUser;
+
+    // Check if user exists by googleId or email
+    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+    if (user) {
+      // Link Google account if existing user signed up with email/password
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.authProvider = 'google';
+        await user.save();
+      }
+
+      if (user.isBanned) {
+        return res.status(403).json({ error: 'Your account has been banned.' });
+      }
+
+      await User.findByIdAndUpdate(user._id, { isOnline: true, lastSeen: new Date() });
+
+      const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+      return res.status(200).json({
+        token,
+        user: { userId: user._id, name: user.name, email: user.email },
+        isNewUser: false,
+      });
+    }
+
+    // Create new user
+    const username = await generateUsername(name);
+    user = new User({
+      name,
+      username,
+      email,
+      googleId,
+      authProvider: 'google',
+      profilePhoto: picture || null,
+      age: 18,
+      gender: 'male',
+      isOnline: true,
+      lastSeen: new Date(),
+    });
+    await user.save();
+
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.status(201).json({
+      token,
+      user: { userId: user._id, name: user.name, email: user.email },
+      isNewUser: true,
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
