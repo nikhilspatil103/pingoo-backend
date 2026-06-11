@@ -341,24 +341,40 @@ app.post('/api/login', async (req, res) => {
 
 // Google Auth API
 app.post('/api/auth/google', async (req, res) => {
-  const { accessToken } = req.body;
+  const { idToken, accessToken } = req.body;
 
-  if (!accessToken) {
-    return res.status(400).json({ error: 'Access token is required' });
+  if (!idToken && !accessToken) {
+    return res.status(400).json({ error: 'Token is required' });
   }
 
   try {
-    // Fetch user info from Google
-    const googleRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    let googleId, email, name, picture;
 
-    if (!googleRes.ok) {
-      return res.status(401).json({ error: 'Invalid Google token' });
+    if (idToken) {
+      // Verify idToken via Google's tokeninfo endpoint
+      const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+      if (!googleRes.ok) {
+        return res.status(401).json({ error: 'Invalid Google token' });
+      }
+      const payload = await googleRes.json();
+      googleId = payload.sub;
+      email = payload.email;
+      name = payload.name;
+      picture = payload.picture;
+    } else {
+      // Fallback: verify accessToken
+      const googleRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!googleRes.ok) {
+        return res.status(401).json({ error: 'Invalid Google token' });
+      }
+      const googleUser = await googleRes.json();
+      googleId = googleUser.id;
+      email = googleUser.email;
+      name = googleUser.name;
+      picture = googleUser.picture;
     }
-
-    const googleUser = await googleRes.json();
-    const { id: googleId, email, name, picture } = googleUser;
 
     // Check if user exists by googleId or email
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
