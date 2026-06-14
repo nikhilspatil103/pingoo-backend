@@ -1,0 +1,41 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: pingoo
+service: pingoo-backend
+
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-south-1  # Mumbai - closest to India
+  stage: ${opt:stage, 'dev'}
+  profile: personal  # Uses your AWS CLI 'personal' profile
+  timeout: 30
+  memorySize: 1024  # More memory = faster MongoDB connection + faster cold starts
+  deploymentBucket:
+    name: pingoo-backend-deploy-323965931048
+  environment:
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    CLOUDINARY_CLOUD_NAME: ${env:CLOUDINARY_CLOUD_NAME}
+    CLOUDINARY_API_KEY: ${env:CLOUDINARY_API_KEY}
+    CLOUDINARY_API_SECRET: ${env:CLOUDINARY_API_SECRET}
+    REDIS_URL: ${env:REDIS_URL, ''}
+
+functions:
+  api:
+    handler: lambda.handler
+    events:
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+      - httpApi:
+          path: /
+          method: ANY
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000
