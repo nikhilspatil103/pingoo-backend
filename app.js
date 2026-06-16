@@ -736,6 +736,14 @@ app.get('/api/my-moods', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
+app.get('/api/user-moods/:userId', authMiddleware, async (req, res) => {
+  try {
+    const moods = await Mood.find({ userId: req.params.userId, isActive: true }).sort({ createdAt: -1 }).limit(9).lean();
+    const transformed = moods.map(m => ({ id: m._id, videoUrl: m.videoUrl, thumbnailUrl: m.thumbnailUrl || null, caption: m.caption, mood: m.mood, likesCount: m.likes.length, views: m.views || 0, createdAt: m.createdAt }));
+    res.status(200).json({ moods: transformed });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
+});
+
 app.patch('/api/mood/:moodId/toggle', authMiddleware, async (req, res) => {
   try {
     const mood = await Mood.findOne({ _id: req.params.moodId, userId: req.user.userId });
