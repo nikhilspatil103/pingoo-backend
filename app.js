@@ -14,8 +14,24 @@ const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const redis = require('redis');
 const { Expo } = require('expo-server-sdk');
+const { GoogleAuth } = require('google-auth-library');
+const path = require('path');
 
 const expo = new Expo();
+
+// FCM v1 setup
+let fcmAuth = null;
+let fcmProjectId = null;
+try {
+  const serviceAccount = require('./firebase-service-account.json');
+  fcmProjectId = serviceAccount.project_id;
+  fcmAuth = new GoogleAuth({
+    credentials: serviceAccount,
+    scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
+  });
+} catch (e) {
+  console.log('⚠️ Firebase service account not found, FCM notifications disabled');
+}
 
 // Cloudinary config
 cloudinary.config({
@@ -128,10 +144,51 @@ const authMiddleware = (req, res, next) => {
 
 // Push notification helper
 const sendPushNotification = async (pushToken, title, body, data = {}) => {
-  if (!Expo.isExpoPushToken(pushToken)) return;
+  if (!pushToken) return;
+  
+  // Expo push token format
+  if (Expo.isExpoPushToken(pushToken)) {
+    try {
+      await expo.sendPushNotificationsAsync([{ to: pushToken, sound: 'default', title, body, data, priority: 'high', channelId: 'default' }]);
+    } catch (e) { console.error('Expo push error:', e.message); }
+    return;
+  }
+  
+  // Native FCM token - send via FCM HTTP v1 API
+  if (!fcmAuth || !fcmProjectId) {
+    console.log('FCM not configured, skipping push notification');
+    return;
+  }
   try {
-    await expo.sendPushNotificationsAsync([{ to: pushToken, sound: 'default', title, body, data, priority: 'high', channelId: 'default' }]);
-  } catch (e) { console.error('Push notification error:', e.message); }
+    const client = await fcmAuth.getClient();
+    const accessToken = (await client.getAccessToken()).token;
+    
+    const message = {
+      message: {
+        token: pushToken,
+        notification: { title, body },
+        data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+        android: {
+          priority: 'high',
+          notification: { channel_id: 'default', sound: 'default' },
+        },
+      },
+    };
+
+    const res = await fetch(`https://fcm.googleapis.com/v1/projects/${fcmProjectId}/messages:send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(message),
+    });
+    
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('FCM v1 error:', err);
+    }
+  } catch (e) { console.error('FCM push error:', e.message); }
 };
 
 // Health check
