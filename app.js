@@ -23,7 +23,18 @@ const expo = new Expo();
 let fcmAuth = null;
 let fcmProjectId = null;
 try {
-  const serviceAccount = require('./firebase-service-account.json');
+  let serviceAccount;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    serviceAccount = {
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    };
+  } else {
+    serviceAccount = require('./firebase-service-account.json');
+  }
   fcmProjectId = serviceAccount.project_id;
   fcmAuth = new GoogleAuth({
     credentials: serviceAccount,
@@ -144,19 +155,21 @@ const authMiddleware = (req, res, next) => {
 
 // Push notification helper
 const sendPushNotification = async (pushToken, title, body, data = {}) => {
-  if (!pushToken) return;
+  console.log('📨 sendPush called:', { pushToken: pushToken?.substring(0, 20) + '...', title, isExpo: Expo.isExpoPushToken(pushToken), fcmReady: !!(fcmAuth && fcmProjectId) });
+  if (!pushToken) { console.log('❌ No pushToken'); return; }
   
   // Expo push token format
   if (Expo.isExpoPushToken(pushToken)) {
     try {
       await expo.sendPushNotificationsAsync([{ to: pushToken, sound: 'default', title, body, data, priority: 'high', channelId: 'default' }]);
+      console.log('✅ Expo push sent');
     } catch (e) { console.error('Expo push error:', e.message); }
     return;
   }
   
   // Native FCM token - send via FCM HTTP v1 API
   if (!fcmAuth || !fcmProjectId) {
-    console.log('FCM not configured, skipping push notification');
+    console.log('❌ FCM not configured, skipping push notification');
     return;
   }
   try {
