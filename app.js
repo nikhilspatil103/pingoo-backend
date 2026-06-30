@@ -131,8 +131,7 @@ app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
 // Rate limiting handled by API Gateway throttling (serverless.yml)
 // In-memory rate-limit removed as it doesn't work across Lambda instances
-app.use('/api/upload-image-base64', uploadLimiter);
-app.use('/api/upload-image-public', uploadLimiter);
+
 
 // Auth middleware
 const authMiddleware = (req, res, next) => {
@@ -449,14 +448,23 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
   try {
     const currentUserId = req.user.userId;
     const { userId } = req.params;
-    const messages = await Message.find({ $or: [{ senderId: currentUserId, receiverId: userId }, { senderId: userId, receiverId: currentUserId }] }).sort({ timestamp: 1 });
-    const formatted = messages.map(msg => ({
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const totalCount = await Message.countDocuments({ $or: [{ senderId: currentUserId, receiverId: userId }, { senderId: userId, receiverId: currentUserId }] });
+    const messages = await Message.find({ $or: [{ senderId: currentUserId, receiverId: userId }, { senderId: userId, receiverId: currentUserId }] })
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const formatted = messages.reverse().map(msg => ({
       id: msg._id, text: msg.isRecalled ? (msg.senderId.toString() === currentUserId ? 'You recalled this message' : 'This message was recalled') : (msg.message || ''),
       mediaUrl: msg.isRecalled ? null : (msg.mediaUrl || null), mediaType: msg.isRecalled ? 'text' : (msg.mediaType || 'text'),
       audioDuration: msg.audioDuration || null, replyTo: msg.replyTo || null, isRecalled: msg.isRecalled || false, isRead: msg.isRead || false,
       sent: msg.senderId.toString() === currentUserId, time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), timestamp: msg.timestamp
     }));
-    res.status(200).json({ messages: formatted });
+    res.status(200).json({ messages: formatted, page, hasMore: skip + limit < totalCount });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
