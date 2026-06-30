@@ -12,8 +12,8 @@ module.exports.handler = async (event, context) => {
     console.log('Connecting to MongoDB from Lambda...');
     try {
       await mongoose.connect(MONGODB_URI, {
-        maxPoolSize: 10,
-        minPoolSize: 2,
+        maxPoolSize: 2,
+        minPoolSize: 1,
         socketTimeoutMS: 45000,
         serverSelectionTimeoutMS: 15000,
       });

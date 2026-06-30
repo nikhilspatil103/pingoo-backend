@@ -61,4 +61,9 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Indexes for fast queries
+userSchema.index({ gender: 1, isBanned: 1 });
+userSchema.index({ isOnline: 1 });
+userSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('User', userSchema);

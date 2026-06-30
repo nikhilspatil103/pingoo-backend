@@ -27,10 +27,7 @@ const messageSchema = new mongoose.Schema({
     type: Number
   },
   replyTo: {
-    messageId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Message'
-    },
+    messageId: String,
     text: String
   },
   timestamp: {
@@ -44,11 +41,12 @@ const messageSchema = new mongoose.Schema({
   isRecalled: {
     type: Boolean,
     default: false
-  },
-  replyTo: {
-    messageId: String,
-    text: String
   }
 });
+
+// Indexes for fast message queries
+messageSchema.index({ senderId: 1, receiverId: 1, timestamp: -1 });
+messageSchema.index({ receiverId: 1, senderId: 1, timestamp: -1 });
+messageSchema.index({ receiverId: 1, isRead: 1 });
 
 module.exports = mongoose.model('Message', messageSchema);
