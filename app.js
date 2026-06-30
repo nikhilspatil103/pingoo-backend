@@ -689,19 +689,36 @@ app.post('/api/report/:userId', authMiddleware, async (req, res) => {
 });
 
 // ==================== MOOD APIs ====================
+// Get Cloudinary upload signature for direct frontend upload
+app.get('/api/cloudinary-signature', authMiddleware, async (req, res) => {
+  try {
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const folder = req.query.folder || 'pingoo-moods';
+    const signature = cloudinary.utils.api_sign_request({ timestamp, folder }, process.env.CLOUDINARY_API_SECRET);
+    res.json({ timestamp, signature, cloudName: process.env.CLOUDINARY_CLOUD_NAME, apiKey: process.env.CLOUDINARY_API_KEY, folder });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
+});
+
 app.post('/api/mood', authMiddleware, async (req, res) => {
   try {
-    const { video, thumbnail, caption, mood } = req.body;
-    if (!video) return res.status(400).json({ error: 'Video required' });
+    const { videoUrl, thumbnailUrl, caption, mood, video, thumbnail } = req.body;
 
-    const result = await cloudinary.uploader.upload(video, { folder: 'pingoo-moods', resource_type: 'video', transformation: [{ quality: 'auto', duration: 15 }] });
-    let thumbnailUrl = null;
-    if (thumbnail) {
+    // Support direct URL (new flow) or base64 (legacy fallback)
+    let finalVideoUrl = videoUrl;
+    let finalThumbnailUrl = thumbnailUrl || null;
+
+    if (!finalVideoUrl && video) {
+      const result = await cloudinary.uploader.upload(video, { folder: 'pingoo-moods', resource_type: 'video', transformation: [{ quality: 'auto', duration: 15 }] });
+      finalVideoUrl = result.secure_url;
+    }
+    if (!finalThumbnailUrl && thumbnail) {
       const thumbResult = await cloudinary.uploader.upload(thumbnail, { folder: 'pingoo-moods-thumbnails', transformation: [{ width: 400, height: 700, crop: 'fill' }, { quality: 'auto' }] });
-      thumbnailUrl = thumbResult.secure_url;
+      finalThumbnailUrl = thumbResult.secure_url;
     }
 
-    const newMood = new Mood({ userId: req.user.userId, videoUrl: result.secure_url, thumbnailUrl, caption: caption || '', mood: mood || 'vibing' });
+    if (!finalVideoUrl) return res.status(400).json({ error: 'Video required' });
+
+    const newMood = new Mood({ userId: req.user.userId, videoUrl: finalVideoUrl, thumbnailUrl: finalThumbnailUrl, caption: caption || '', mood: mood || 'vibing' });
     await newMood.save();
     res.status(201).json({ message: 'Mood posted!', mood: newMood });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
