@@ -6,7 +6,6 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const validator = require('validator');
-const rateLimit = require('express-rate-limit');
 const User = require('./models/User');
 const Message = require('./models/Message');
 const Mood = require('./models/Mood');
@@ -130,14 +129,8 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
-// Rate limiting
-const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: { error: 'Too many requests' } });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { error: 'Too many login attempts' } });
-const uploadLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { error: 'Too many uploads' } });
-
-app.use('/api/', generalLimiter);
-app.use('/api/login', authLimiter);
-app.use('/api/signup', authLimiter);
+// Rate limiting handled by API Gateway throttling (serverless.yml)
+// In-memory rate-limit removed as it doesn't work across Lambda instances
 app.use('/api/upload-image-base64', uploadLimiter);
 app.use('/api/upload-image-public', uploadLimiter);
 

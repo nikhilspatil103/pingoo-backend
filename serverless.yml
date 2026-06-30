@@ -11,9 +11,13 @@ provider:
   stage: ${opt:stage, 'dev'}
   profile: personal  # Uses your AWS CLI 'personal' profile
   timeout: 30
-  memorySize: 1024  # More memory = faster MongoDB connection + faster cold starts
+  memorySize: 1024
   deploymentBucket:
     name: pingoo-backend-deploy-323965931048
+  httpApi:
+    throttling:
+      maxRequestsPerSecond: 50
+      burstLimit: 100
   environment:
     MONGODB_URI: ${env:MONGODB_URI}
     JWT_SECRET: ${env:JWT_SECRET}
