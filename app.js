@@ -306,13 +306,30 @@ app.post('/api/register-push-token', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const formatDistanceLabel = (km) => {
+  if (km < 2) return 'Too Close';
+  if (km < 5) return 'Nearby';
+  if (km < 15) return 'In your area';
+  if (km < 50) return `~${Math.round(km / 5) * 5} km away`;
+  return 'Far away';
+};
+
 app.get('/api/users', authMiddleware, async (req, res) => {
   try {
     const currentUserId = req.user.userId;
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const skip = (page - 1) * limit;
-
+    const userLat = parseFloat(req.headers['x-user-lat']);
+    const userLng = parseFloat(req.headers['x-user-lng']);
     const currentUser = await User.findById(currentUserId).select('blockedUsers interestedIn');
     const blockedUsers = currentUser?.blockedUsers || [];
     const interestedIn = currentUser?.interestedIn;
@@ -325,11 +342,20 @@ app.get('/api/users', authMiddleware, async (req, res) => {
       .select('name age gender profilePhoto location latitude longitude lookingFor isOnline lastSeen likes')
       .sort({ isOnline: -1, lastSeen: -1 }).skip(skip).limit(limit).lean();
 
-    const transformedUsers = users.map(user => ({
-      id: user._id, name: user.name, username: user.username, age: user.age, gender: user.gender,
-      profilePhoto: user.profilePhoto, location: user.location, latitude: user.latitude, longitude: user.longitude,
-      lookingFor: user.lookingFor, isOnline: user.isOnline, lastSeen: user.lastSeen, likesCount: user.likes?.length || 0
-    }));
+    const hasCallerLocation = !isNaN(userLat) && !isNaN(userLng);
+
+    const transformedUsers = users.map(user => {
+      let distanceLabel = null;
+      if (hasCallerLocation && user.latitude && user.longitude) {
+        const km = haversineDistance(userLat, userLng, user.latitude, user.longitude);
+        distanceLabel = formatDistanceLabel(km);
+      }
+      return {
+        id: user._id, name: user.name, username: user.username, age: user.age, gender: user.gender,
+        profilePhoto: user.profilePhoto, location: distanceLabel,
+        lookingFor: user.lookingFor, isOnline: user.isOnline, lastSeen: user.lastSeen, likesCount: user.likes?.length || 0
+      };
+    });
 
     res.status(200).json({ users: transformedUsers, page, limit });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
@@ -357,7 +383,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
     const user = await User.findById(userId, { password: 0 });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const userProfile = { id: user._id, name: user.name, username: user.username, email: user.email, age: user.age, gender: user.gender, interestedIn: user.interestedIn, profilePhoto: user.profilePhoto, additionalPhotos: user.additionalPhotos || [], location: user.location, latitude: user.latitude, longitude: user.longitude, interests: user.interests || [], bio: user.bio, height: user.height, bodyType: user.bodyType, smoking: user.smoking, drinking: user.drinking, exercise: user.exercise, diet: user.diet, occupation: user.occupation, company: user.company, graduation: user.graduation, school: user.school, hometown: user.hometown, currentCity: user.currentCity, lookingFor: user.lookingFor, relationshipStatus: user.relationshipStatus, kids: user.kids, languages: user.languages || [], likes: user.likes || [], coins: user.coins || 0, isOnline: user.isOnline, lastSeen: user.lastSeen, createdAt: user.createdAt };
+    const userProfile = { id: user._id, name: user.name, username: user.username, email: user.email, age: user.age, gender: user.gender, interestedIn: user.interestedIn, profilePhoto: user.profilePhoto, additionalPhotos: user.additionalPhotos || [], location: user.location, interests: user.interests || [], bio: user.bio, height: user.height, bodyType: user.bodyType, smoking: user.smoking, drinking: user.drinking, exercise: user.exercise, diet: user.diet, occupation: user.occupation, company: user.company, graduation: user.graduation, school: user.school, hometown: user.hometown, currentCity: user.currentCity, lookingFor: user.lookingFor, relationshipStatus: user.relationshipStatus, kids: user.kids, languages: user.languages || [], likes: user.likes || [], coins: user.coins || 0, isOnline: user.isOnline, lastSeen: user.lastSeen, createdAt: user.createdAt };
     await setCache(`profile:${userId}`, userProfile, CACHE_TTL.USER_PROFILE);
     res.status(200).json({ user: userProfile });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
@@ -367,7 +393,13 @@ app.get('/api/user/:userId', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId, { password: 0 });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.status(200).json({ user: { id: user._id, name: user.name, username: user.username, email: user.email, age: user.age, gender: user.gender, profilePhoto: user.profilePhoto, additionalPhotos: user.additionalPhotos || [], location: user.location, latitude: user.latitude, longitude: user.longitude, interests: user.interests || [], bio: user.bio, height: user.height, bodyType: user.bodyType, smoking: user.smoking, drinking: user.drinking, exercise: user.exercise, diet: user.diet, occupation: user.occupation, company: user.company, graduation: user.graduation, school: user.school, hometown: user.hometown, currentCity: user.currentCity, lookingFor: user.lookingFor, relationshipStatus: user.relationshipStatus, kids: user.kids, languages: user.languages || [], isOnline: user.isOnline, lastSeen: user.lastSeen, createdAt: user.createdAt } });
+    const userLat = parseFloat(req.headers['x-user-lat']);
+    const userLng = parseFloat(req.headers['x-user-lng']);
+    let distanceLabel = null;
+    if (!isNaN(userLat) && !isNaN(userLng) && user.latitude && user.longitude) {
+      distanceLabel = formatDistanceLabel(haversineDistance(userLat, userLng, user.latitude, user.longitude));
+    }
+    res.status(200).json({ user: { id: user._id, name: user.name, username: user.username, email: user.email, age: user.age, gender: user.gender, profilePhoto: user.profilePhoto, additionalPhotos: user.additionalPhotos || [], location: distanceLabel, interests: user.interests || [], bio: user.bio, height: user.height, bodyType: user.bodyType, smoking: user.smoking, drinking: user.drinking, exercise: user.exercise, diet: user.diet, occupation: user.occupation, company: user.company, graduation: user.graduation, school: user.school, hometown: user.hometown, currentCity: user.currentCity, lookingFor: user.lookingFor, relationshipStatus: user.relationshipStatus, kids: user.kids, languages: user.languages || [], isOnline: user.isOnline, lastSeen: user.lastSeen, createdAt: user.createdAt } });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -436,9 +468,9 @@ app.put('/api/set-profile-photo', authMiddleware, async (req, res) => {
 // ==================== LOCATION ====================
 app.put('/api/location', authMiddleware, async (req, res) => {
   try {
-    const { latitude, longitude, location } = req.body;
+    const { latitude, longitude } = req.body;
     if (!latitude || !longitude) return res.status(400).json({ error: 'Latitude and longitude required' });
-    await User.findByIdAndUpdate(req.user.userId, { latitude, longitude, location: location || 'Unknown', lastSeen: new Date() });
+    await User.findByIdAndUpdate(req.user.userId, { latitude, longitude, lastSeen: new Date() });
     res.status(200).json({ message: 'Location updated' });
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
