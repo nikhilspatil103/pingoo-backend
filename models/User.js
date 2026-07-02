@@ -46,6 +46,8 @@ const userSchema = new mongoose.Schema({
     expiresAt: { type: Date }
   }],
   lastSpinDate: { type: Date },
+  dailyStreak: { type: Number, default: 0 },
+  lastDailyReward: { type: Date },
   pushToken: { type: String },
   newLikes: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

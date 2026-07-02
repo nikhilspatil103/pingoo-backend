@@ -673,6 +673,44 @@ app.post('/api/spin-wheel', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// ==================== DAILY REWARD ====================
+app.get('/api/daily-reward/status', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('dailyStreak lastDailyReward coins');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const now = new Date();
+    const last = user.lastDailyReward ? new Date(user.lastDailyReward) : null;
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const alreadyClaimed = last && last >= todayStart;
+    const streak = user.dailyStreak || 0;
+    res.status(200).json({ alreadyClaimed, streak, coins: user.coins, nextRewardAt: alreadyClaimed ? new Date(todayStart.getTime() + 24 * 60 * 60 * 1000) : null });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.post('/api/daily-reward/claim', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+    const last = user.lastDailyReward ? new Date(user.lastDailyReward) : null;
+    if (last && last >= todayStart) return res.status(400).json({ error: 'Already claimed today' });
+    // Reset streak if missed a day
+    const isConsecutive = last && last >= yesterdayStart;
+    user.dailyStreak = isConsecutive ? (user.dailyStreak || 0) + 1 : 1;
+    // Bonus on day 5 and day 10
+    let earned = 10;
+    if (user.dailyStreak === 5) earned = 50;
+    else if (user.dailyStreak === 10) earned = 50;
+    if (typeof user.coins !== 'number') user.coins = 0;
+    user.coins += earned;
+    user.lastDailyReward = now;
+    await user.save();
+    res.status(200).json({ earned, streak: user.dailyStreak, totalCoins: user.coins, isBonus: earned > 10 });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
+});
+
 // ==================== BLOCK / REPORT ====================
 app.post('/api/block/:userId', authMiddleware, async (req, res) => {
   try {
